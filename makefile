@@ -4,11 +4,12 @@ CFLAGS = -I. \
          -I./lvgl/src \
          -I./lvgl/demos \
          -I./lvgl/src/drivers/sdl \
-         -Wall `sdl2-config --cflags`
+         -I./lvgl/src/libs/lodepng \
+         -Wall -O2 `sdl2-config --cflags`
 
-LDFLAGS = `sdl2-config --libs`
+LDLIBS = `sdl2-config --libs`
 
-# Collect all sources recursively
+# SOURCES: compile 1.c separately (do NOT #include it into main.c)
 SRC = main.c \
       $(wildcard lvgl/src/*.c) \
       $(wildcard lvgl/src/*/*.c) \
@@ -17,13 +18,15 @@ SRC = main.c \
       $(wildcard lvgl/demos/*.c) \
       $(wildcard lvgl/demos/*/*.c) \
       $(wildcard lvgl/demos/*/*/*.c) \
-      $(wildcard lvgl/demos/*/*/*/*.c) \
-      $(wildcard lvgl/src/drivers/sdl/*.c)
+      $(wildcard lvgl/demos/*/*/*/*.c)
 
 OBJ = $(SRC:.c=.o)
 
 app: $(OBJ)
-	$(CC) -o $@ $^ $(LDFLAGS)
+	$(CC) -o $@ $(OBJ) $(LDLIBS)
+
+%.o: %.c
+	$(CC) $(CFLAGS) -c $< -o $@
 
 clean:
 	rm -f $(OBJ) app
