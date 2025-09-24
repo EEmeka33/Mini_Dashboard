@@ -6,6 +6,8 @@
 #include "drivers/sdl/lv_sdl_keyboard.h"
 #include "lvgl.h"
 
+/* Declare font symbol so the compiler knows about it (safe even if LV_FONT_DEFAULT used) */
+LV_FONT_DECLARE(lv_font_montserrat_14);
 
 static lv_display_t *lvDisplay;
 static lv_indev_t *lvMouse;
@@ -48,8 +50,15 @@ int main()
 
     /* Create a simple widget to test */
     lv_obj_t * label = lv_label_create(lv_scr_act());
-    lv_label_set_text(label, "Hello LVGL!");
+    lv_label_set_text(label, "Hello LVGL with Montserrat!");
     lv_obj_center(label);
+
+    /* Apply Montserrat font to this label only */
+    lv_obj_set_style_text_font(label, &lv_font_montserrat_14, 0);
+
+    /* Alternatively: apply font to the whole screen
+       lv_obj_set_style_text_font(lv_scr_act(), &lv_font_montserrat_14, 0);
+    */
 
     /* Main loop */
     Uint32 lastTick = SDL_GetTicks();

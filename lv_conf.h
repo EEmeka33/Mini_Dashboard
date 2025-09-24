@@ -4,8 +4,7 @@
  */
 
 
-#define SDL_HOR_RES 400
-#define SDL_VER_RES 400
+
 /*
  * Copy this file as `lv_conf.h`
  * 1. simply next to `lvgl` folder
@@ -633,7 +632,7 @@
 #define LV_FONT_MONTSERRAT_16 0
 #define LV_FONT_MONTSERRAT_18 0
 #define LV_FONT_MONTSERRAT_20 0
-#define LV_FONT_MONTSERRAT_22 0
+#define LV_FONT_MONTSERRAT_22 1
 #define LV_FONT_MONTSERRAT_24 0
 #define LV_FONT_MONTSERRAT_26 0
 #define LV_FONT_MONTSERRAT_28 0

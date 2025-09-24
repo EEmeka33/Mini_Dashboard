@@ -4,10 +4,9 @@ CFLAGS = -I. \
          -I./lvgl/src \
          -I./lvgl/demos \
          -I./lvgl/src/drivers/sdl \
-         -I./lvgl/src/libs/lodepng \
          -Wall -O2 `sdl2-config --cflags`
 
-LDLIBS = `sdl2-config --libs`
+LDLIBS = `sdl2-config --libs` -lm
 
 # SOURCES: compile 1.c separately (do NOT #include it into main.c)
 SRC = main.c \
