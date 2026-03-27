@@ -1,0 +1,361 @@
+/*
+ * Round Dashboard with Navigation, Music Player, and Call Management
+ * Resolution: 1080x1080 round screen
+ * Integrates: nav_logger.c, album_art.c, bt_player.c, hfp_calls.c
+ */
+
+#define _GNU_SOURCE
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <math.h>
+#include <pthread.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <errno.h>
+#include <dbus/dbus.h>
+#include <json-c/json.h>
+
+#include "lvgl/lvgl.h"
+#include "lv_conf.h"
+#include "hal/hal.h"
+#include <SDL.h>
+
+/* ========== CONFIGURATION ========== */
+#define SCREEN_W                1080
+#define SCREEN_H                1080
+#define NAV_LOG_FILE           "nav_log.jsonl"
+#define MUSIC_COVER_PATH       "cover.jpg"
+#define CENTER_RADIUS          300
+#define BOTTOM_PLAYER_HEIGHT   250
+
+/* ========== DATA STRUCTURES ========== */
+
+typedef struct {
+    char instruction[256];      /* Turn instruction */
+    double distance;            /* Distance in meters */
+    double next_distance;       /* Distance to next maneuver */
+    char street_name[256];      /* Current street */
+    double speed;               /* Current speed km/h */
+    double lat;                 /* Current latitude */
+    double lon;                 /* Current longitude */
+} nav_info_t;
+
+typedef struct {
+    char title[256];
+    char artist[256];
+    char album[256];
+    char status[32];            /* "playing", "paused", "stopped" */
+    unsigned int position_ms;
+    unsigned int duration_ms;
+    char cover_path[512];
+} music_info_t;
+
+typedef struct {
+    char state[32];             /* "active", "incoming", "dialing", etc */
+    char line_id[64];           /* Phone number */
+    char name[64];              /* Contact name */
+    char call_path[256];        /* DBus object path */
+} call_info_t;
+
+typedef struct {
+    nav_info_t nav;
+    music_info_t music;
+    call_info_t current_call;
+    int has_incoming_call;
+    pthread_mutex_t lock;
+} app_state_t;
+
+static app_state_t g_state = {0};
+
+/* ========== UI OBJECTS ========== */
+
+static lv_obj_t *g_scr_main = NULL;
+static lv_obj_t *g_nav_label = NULL;
+static lv_obj_t *g_nav_dist_label = NULL;
+static lv_obj_t *g_nav_street_label = NULL;
+static lv_obj_t *g_music_img = NULL;
+static lv_obj_t *g_music_label = NULL;
+static lv_obj_t *g_music_artist_label = NULL;
+static lv_obj_t *g_btn_prev = NULL;
+static lv_obj_t *g_btn_play = NULL;
+static lv_obj_t *g_btn_next = NULL;
+static lv_obj_t *g_call_panel = NULL;
+static lv_obj_t *g_call_number_label = NULL;
+static lv_obj_t *g_btn_answer = NULL;
+static lv_obj_t *g_btn_hangup = NULL;
+
+// ---------- Lecture NMEA (thread) ----------
+
+static int open_serial(const char *dev)
+{
+    int fd = open(dev, O_RDONLY | O_NOCTTY);
+    if (fd < 0) {
+        perror("open");
+        return -1;
+    }
+    struct termios tio;
+    if (tcgetattr(fd, &tio) == 0) {
+        cfmakeraw(&tio);
+        tcsetattr(fd, TCSANOW, &tio);
+    }
+    return fd;
+}
+
+static double nmea_lat_to_deg(const char *lat_str, const char *ns)
+{
+    if (!lat_str || !*lat_str) return 0.0;
+    double val = atof(lat_str);
+    int deg = (int)(val / 100.0);
+    double minutes = val - (deg * 100.0);
+    double deg_dec = deg + minutes / 60.0;
+    if (ns && (*ns == 'S' || *ns == 's')) deg_dec = -deg_dec;
+    return deg_dec;
+}
+
+static double nmea_lon_to_deg(const char *lon_str, const char *ew)
+{
+    if (!lon_str || !*lon_str) return 0.0;
+    double val = atof(lon_str);
+    int deg = (int)(val / 100.0);
+    double minutes = val - (deg * 100.0);
+    double deg_dec = deg + minutes / 60.0;
+    if (ew && (*ew == 'W' || *ew == 'w')) deg_dec = -deg_dec;
+    return deg_dec;
+}
+
+static void *gps_thread_fn(void *arg)
+{
+    int fd = open_serial(NMEA_DEVICE);
+    if (fd < 0) {
+        fprintf(stderr, "gps_thread: failed to open %s\n", NMEA_DEVICE);
+        return NULL;
+    }
+    FILE *f = fdopen(fd, "r");
+    if (!f) {
+        perror("fdopen");
+        close(fd);
+        return NULL;
+    }
+
+    char line[512];
+    while (fgets(line, sizeof(line), f)) {
+        size_t len = strlen(line);
+        if (len > 0 && (line[len-1] == '\n' || line[len-1] == '\r'))
+            line[len-1] = '\0';
+
+        if (strncmp(line, "$GPRMC", 6) != 0 &&
+            strncmp(line, "$GNRMC", 6) != 0) {
+            continue;
+        }
+
+        char *fields[16] = {0};
+        int field_count = 0;
+        char *p = line;
+        while (field_count < 16) {
+            char *comma = strchr(p, ',');
+            if (!comma) {
+                fields[field_count++] = p;
+                break;
+            }
+            *comma = '\0';
+            fields[field_count++] = p;
+            p = comma + 1;
+        }
+        if (field_count < 10) continue;
+
+        const char *status   = fields[2];
+        const char *lat_str  = fields[3];
+        const char *ns       = fields[4];
+        const char *lon_str  = fields[5];
+        const char *ew       = fields[6];
+        const char *speed_kn = fields[7];
+        const char *track_deg= fields[8];
+
+        if (status[0] != 'A') {
+            pthread_mutex_lock(&g_gps_mutex);
+            g_gps.has_fix = 0;
+            pthread_mutex_unlock(&g_gps_mutex);
+            continue;
+        }
+
+        double lat = nmea_lat_to_deg(lat_str, ns);
+        double lon = nmea_lon_to_deg(lon_str, ew);
+        double spd_knots = atof(speed_kn);
+        double spd_kmh   = spd_knots * 1.852;
+        double track     = atof(track_deg);
+
+        pthread_mutex_lock(&g_gps_mutex);
+        g_gps.lat = lat;
+        g_gps.lon = lon;
+        g_gps.speed = spd_kmh;
+        g_gps.track = track;
+        g_gps.has_fix = 1;
+        pthread_mutex_unlock(&g_gps_mutex);
+    }
+
+    fclose(f);
+    return NULL;
+}
+
+// ---------- Conversion lat/lon → tuiles OSM ----------
+
+static void latlon_to_tile(double lat_deg, double lon_deg, int zoom,
+                           int *x_tile, int *y_tile, double *x_frac, double *y_frac)
+{
+    double lat_rad = lat_deg * M_PI / 180.0;
+    double n = pow(2.0, zoom);
+    double xt = (lon_deg + 180.0) / 360.0 * n;
+    double yt = (1.0 - log(tan(lat_rad) + 1.0 / cos(lat_rad)) / M_PI) / 2.0 * n;
+
+    *x_tile = (int)floor(xt);
+    *y_tile = (int)floor(yt);
+    if (x_frac) *x_frac = xt - *x_tile;
+    if (y_frac) *y_frac = yt - *y_tile;
+}
+
+// ---------- UI LVGL ----------
+
+static lv_obj_t *map_container;
+static lv_obj_t *position_marker;
+static lv_obj_t *direction_label;
+static int current_zoom = MAP_ZOOM;
+
+// helper: charge une tuile (z, x, y) dans une image LVGL
+static lv_obj_t *create_tile(lv_obj_t *parent, int z, int x, int y, int pos_x, int pos_y)
+{
+    char path[256];
+    snprintf(path, sizeof(path), TILE_DIR"/%d_%d_%d.png", z, x, y);
+
+    lv_obj_t *img = lv_image_create(parent);
+    lv_image_set_src(img, path);
+    lv_obj_set_pos(img, pos_x, pos_y);
+    return img;
+}
+
+
+static void map_update_cb(lv_timer_t *t)
+{
+    gps_state_t gps;
+    pthread_mutex_lock(&g_gps_mutex);
+    gps = g_gps;
+    pthread_mutex_unlock(&g_gps_mutex);
+
+    if (!gps.has_fix) {
+        lv_label_set_text(direction_label, "GPS: no fix");
+        return;
+    }
+
+    // 1) Calcule tuile centrale à partir de la position actuelle
+    int xt, yt;
+    double x_frac, y_frac;
+    latlon_to_tile(gps.lat, gps.lon, current_zoom, &xt, &yt, &x_frac, &y_frac);
+
+    // Suppose tuiles 256x256, on en affiche 3x3 centrées sur la position
+    const int tile_size = 256;
+    const int grid = 3;
+    int half = grid / 2;
+
+    // Effacer tout puis recréer (simple, pas optimal)
+    lv_obj_clean(map_container);
+
+    for (int dx = -half; dx <= half; dx++) {
+        for (int dy = -half; dy <= half; dy++) {
+            int tx = xt + dx;
+            int ty = yt + dy;
+
+            int px = (dx + half) * tile_size;
+            int py = (dy + half) * tile_size;
+            create_tile(map_container, current_zoom, tx, ty, px, py);
+        }
+    }
+
+    // 2) Position du marker dans le container
+    int map_w = grid * tile_size;
+    int map_h = grid * tile_size;
+
+    double center_x = (double)map_w  * (0.5 + (x_frac - 0.5));
+    double center_y = (double)map_h  * (0.5 + (y_frac - 0.5));
+
+    // Centrer le container dans l'écran et compenser pour marker au centre
+    int offset_x = (SCREEN_W - map_w) / 2;
+    int offset_y = (SCREEN_H - map_h) / 2;
+    lv_obj_set_pos(map_container, offset_x, offset_y);
+
+    // Créer marker (si pas déjà) sur le conteneur
+    if (!position_marker) {
+        position_marker = lv_obj_create(map_container);
+        lv_obj_set_size(position_marker, 10, 10);
+        lv_obj_set_style_bg_color(position_marker, lv_color_hex(0xFF0000), 0);
+        lv_obj_set_style_radius(position_marker, LV_RADIUS_CIRCLE, 0);
+    }
+    lv_obj_set_pos(position_marker,
+                   (int)(center_x - 5),
+                   (int)(center_y - 5));
+
+    // 3) Mettre à jour le bandeau direction / info
+    char buf[128];
+    snprintf(buf, sizeof(buf),
+             "Lat: %.5f  Lon: %.5f  Speed: %.1f km/h  Track: %.0f deg",
+             gps.lat, gps.lon, gps.speed, gps.track);
+    lv_label_set_text(direction_label, buf);
+}
+
+void offline_map_create_ui(void)
+{
+    lv_obj_t *scr = lv_screen_active();
+
+    //for testing: afficher une tuile fixe au centre
+    lv_obj_t *test_img = lv_image_create(scr);
+    lv_image_set_src(test_img, "S:/tiles/test.png");
+    lv_obj_center(test_img);
+
+
+    // Bandeau en haut
+    direction_label = lv_label_create(scr);
+    lv_label_set_text(direction_label, "GPS: waiting fix...");
+    lv_obj_set_width(direction_label, SCREEN_W);
+    lv_obj_set_style_text_align(direction_label, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_bg_color(direction_label, lv_color_hex(0x202020), 0);
+    lv_obj_set_style_text_color(direction_label, lv_color_white(), 0);
+    lv_obj_set_style_pad_all(direction_label, 5, 0);
+    lv_obj_align(direction_label, LV_ALIGN_TOP_MID, 0, 0);
+
+    // Container pour la carte
+    map_container = lv_obj_create(scr);
+    lv_obj_clear_flag(map_container, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_size(map_container, 3 * 256, 3 * 256);
+    lv_obj_set_style_bg_color(map_container, lv_color_hex(0x000000), 0);
+    lv_obj_align(map_container, LV_ALIGN_CENTER, 0, 20);
+
+    // Timer LVGL pour rafraîchir la carte toutes les 500 ms
+    lv_timer_create(map_update_cb, 500, NULL);
+}
+
+// ---------- main (exemple pour lv_port_pc_vscode) ----------
+
+int main(void)
+{
+    lv_init();
+
+    /* Ici tu réutilises l’init SDL de lv_port_pc_vscode (driver display + input).
+       Dans le projet officiel, c’est souvent fait dans main.c, tu peux copier
+       cette partie ou appeler init_display(); init_input(); etc. [web:86][web:254]
+    */
+
+    sdl_hal_init(320, 480);;
+
+    // Lancer le thread GPS
+    pthread_t gps_thread;
+    pthread_create(&gps_thread, NULL, gps_thread_fn, NULL);
+
+    // Créer l’UI
+    offline_map_create_ui();
+
+    while (1) {
+        lv_timer_handler();
+        usleep(5 * 1000);
+    }
+
+    return 0;
+}
