@@ -23,6 +23,7 @@
 #include "hal/hal.h"
 #include <SDL.h>
 #include "speedo_interactive.h"
+#include "bt_pairing.h"
 
 /* ========== CONFIGURATION ========== */
 #define SCREEN_W                1080
@@ -90,6 +91,10 @@ static lv_obj_t *g_call_panel = NULL;
 static lv_obj_t *g_call_number_label = NULL;
 static lv_obj_t *g_btn_answer = NULL;
 static lv_obj_t *g_btn_hangup = NULL;
+static lv_obj_t *g_btn_pair = NULL;
+
+/* Bluetooth discoverable status label */
+static lv_obj_t *g_pair_status_label = NULL;
 
 /* ========== NAVIGATION PARSING ========== */
 
@@ -854,6 +859,19 @@ static void on_btn_hangup_clicked(lv_event_t *e)
     pthread_mutex_unlock(&g_state.lock);
 }
 
+static void on_btn_pair_device_clicked(lv_event_t *e)
+{
+    fprintf(stderr, "[UI] Making Bluetooth discoverable...\n");
+    
+    if (bluetooth_pair_device_start() == 0) {
+        fprintf(stderr, "[UI] Discoverable mode activated\n");
+        lv_label_set_text(g_pair_status_label, "Made Discoverable");
+    } else {
+        fprintf(stderr, "[UI] Failed to activate discoverable\n");
+        lv_label_set_text(g_pair_status_label, "Error");
+    }
+}
+
 /* ========== UI CREATION ========== */
 
 static void create_ui(void)
@@ -956,6 +974,23 @@ static void create_ui(void)
     lv_obj_t *label_next = lv_label_create(g_btn_next);
     lv_label_set_text(label_next, "Next");
     lv_obj_center(label_next);
+
+    /* ===== BLUETOOTH PAIRING (outside music container) ===== */
+    g_btn_pair = lv_button_create(g_scr_main);
+    lv_obj_set_size(g_btn_pair, 60, 60);
+    lv_obj_align(g_btn_pair, LV_ALIGN_BOTTOM_MID, 0, -20);
+    lv_obj_set_style_bg_color(g_btn_pair, lv_color_hex(0x00a8e8), 0);
+    lv_obj_add_event_cb(g_btn_pair, on_btn_pair_device_clicked, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *label_pair = lv_label_create(g_btn_pair);
+    lv_label_set_text(label_pair, "Pair");
+    lv_obj_center(label_pair);
+
+    /* Pairing status label */
+    g_pair_status_label = lv_label_create(g_scr_main);
+    lv_obj_align(g_pair_status_label, LV_ALIGN_BOTTOM_MID, 0, -100);
+    lv_obj_set_style_text_color(g_pair_status_label, lv_color_hex(0x00a8e8), 0);
+    lv_obj_set_style_text_font(g_pair_status_label, &lv_font_montserrat_16, 0);
+    lv_label_set_text(g_pair_status_label, "");
 
     /* ===== CALL OVERLAY (hidden by default) ===== */
     g_call_panel = lv_obj_create(g_scr_main);
