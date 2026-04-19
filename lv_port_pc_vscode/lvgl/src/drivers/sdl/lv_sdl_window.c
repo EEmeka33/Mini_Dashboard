@@ -271,12 +271,16 @@ static void sdl_event_handler(lv_timer_t * t)
             }
         }
         if(event.type == SDL_QUIT) {
+            /* Don't call SDL_Quit() or lv_deinit() - let the application handle graceful shutdown */
+            /* The application will detect the display was deleted and exit properly */
+            /* Commented out to allow graceful application exit:
             SDL_Quit();
             lv_deinit();
             inited = false;
-#if LV_SDL_DIRECT_EXIT
+            #if LV_SDL_DIRECT_EXIT
             exit(0);
-#endif
+            #endif
+            */
         }
     }
 }
