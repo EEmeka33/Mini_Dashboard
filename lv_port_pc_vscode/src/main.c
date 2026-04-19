@@ -219,6 +219,121 @@ static int dbus_connect_system(void)
     return dbus_conn != NULL;
 }
 
+/* Write connected phone MAC to file for nav-bind-daemon.sh */
+static void save_connected_phone_mac(void)
+{
+    if (!dbus_conn) return;
+
+    DBusMessage *msg, *reply;
+    DBusError err;
+    DBusMessageIter args, dict_outer, dict_ifaces, entry_if, entry_prop, entry_var;
+
+    dbus_error_init(&err);
+    msg = dbus_message_new_method_call(
+        "org.bluez", "/", 
+        "org.freedesktop.DBus.ObjectManager", "GetManagedObjects");
+    if (!msg) return;
+
+    reply = dbus_connection_send_with_reply_and_block(dbus_conn, msg, -1, &err);
+    dbus_message_unref(msg);
+
+    if (!reply) {
+        dbus_error_free(&err);
+        return;
+    }
+
+    if (!dbus_message_iter_init(reply, &args) ||
+        dbus_message_iter_get_arg_type(&args) != DBUS_TYPE_ARRAY) {
+        dbus_message_unref(reply);
+        return;
+    }
+
+    dbus_message_iter_recurse(&args, &dict_outer);
+
+    while (dbus_message_iter_get_arg_type(&dict_outer) == DBUS_TYPE_DICT_ENTRY) {
+        dbus_message_iter_recurse(&dict_outer, &entry_if);
+
+        const char *obj_path = NULL;
+        if (dbus_message_iter_get_arg_type(&entry_if) == DBUS_TYPE_OBJECT_PATH) {
+            dbus_message_iter_get_basic(&entry_if, &obj_path);
+        }
+        dbus_message_iter_next(&entry_if);
+
+        if (obj_path && dbus_message_iter_get_arg_type(&entry_if) == DBUS_TYPE_ARRAY) {
+            dbus_message_iter_recurse(&entry_if, &dict_ifaces);
+
+            const char *address = NULL;
+            int is_connected = 0;
+
+            /* Iterate through interfaces */
+            while (dbus_message_iter_get_arg_type(&dict_ifaces) == DBUS_TYPE_DICT_ENTRY) {
+                dbus_message_iter_recurse(&dict_ifaces, &entry_prop);
+                const char *iname = NULL;
+                if (dbus_message_iter_get_arg_type(&entry_prop) == DBUS_TYPE_STRING) {
+                    dbus_message_iter_get_basic(&entry_prop, &iname);
+                }
+                dbus_message_iter_next(&entry_prop);
+
+                /* Check if this is org.bluez.Device1 */
+                if (iname && strcmp(iname, "org.bluez.Device1") == 0) {
+                    DBusMessageIter props_dict, prop_entry;
+                    if (dbus_message_iter_get_arg_type(&entry_prop) == DBUS_TYPE_ARRAY) {
+                        dbus_message_iter_recurse(&entry_prop, &props_dict);
+
+                        /* Iterate through Device1 properties */
+                        while (dbus_message_iter_get_arg_type(&props_dict) == DBUS_TYPE_DICT_ENTRY) {
+                            dbus_message_iter_recurse(&props_dict, &prop_entry);
+                            const char *prop_key = NULL;
+                            if (dbus_message_iter_get_arg_type(&prop_entry) == DBUS_TYPE_STRING) {
+                                dbus_message_iter_get_basic(&prop_entry, &prop_key);
+                            }
+                            dbus_message_iter_next(&prop_entry);
+
+                            if (prop_key) {
+                                if (strcmp(prop_key, "Address") == 0 &&
+                                    dbus_message_iter_get_arg_type(&prop_entry) == DBUS_TYPE_VARIANT) {
+                                    DBusMessageIter var_iter;
+                                    dbus_message_iter_recurse(&prop_entry, &var_iter);
+                                    if (dbus_message_iter_get_arg_type(&var_iter) == DBUS_TYPE_STRING) {
+                                        dbus_message_iter_get_basic(&var_iter, &address);
+                                    }
+                                }
+                                else if (strcmp(prop_key, "Connected") == 0 &&
+                                         dbus_message_iter_get_arg_type(&prop_entry) == DBUS_TYPE_VARIANT) {
+                                    DBusMessageIter var_iter;
+                                    dbus_message_iter_recurse(&prop_entry, &var_iter);
+                                    if (dbus_message_iter_get_arg_type(&var_iter) == DBUS_TYPE_BOOLEAN) {
+                                        dbus_bool_t connected = FALSE;
+                                        dbus_message_iter_get_basic(&var_iter, &connected);
+                                        is_connected = connected;
+                                    }
+                                }
+                            }
+                            dbus_message_iter_next(&props_dict);
+                        }
+                    }
+                }
+                dbus_message_iter_next(&dict_ifaces);
+            }
+
+            /* If we found a connected device with an address, save it */
+            if (is_connected && address) {
+                FILE *f = fopen("/tmp/connected_phone_mac.txt", "w");
+                if (f) {
+                    fprintf(f, "%s\n", address);
+                    fclose(f);
+                    fprintf(stderr, "[Bluetooth] Saved connected phone MAC: %s\n", address);
+                }
+                dbus_message_unref(reply);
+                return;
+            }
+        }
+        dbus_message_iter_next(&dict_outer);
+    }
+
+    dbus_message_unref(reply);
+}
+
 static int find_player_path(void)
 {
     if (!dbus_conn) return 0;
@@ -279,6 +394,7 @@ static int find_player_path(void)
             if (has_player) {
                 strncpy(player_path, obj_path, sizeof(player_path) - 1);
                 dbus_message_unref(reply);
+                save_connected_phone_mac();  /* Save phone MAC to file */
                 return 1;
             }
         }

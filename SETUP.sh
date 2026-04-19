@@ -28,16 +28,10 @@ fi
 # Step 1: Install required packages
 echo -e "${BLUE}Step 1: Installing required packages...${NC}"
 sudo apt-get update
-sudo apt-get install -y \
-    pulseaudio \
-    pulseaudio-module-bluetooth \
-    bluez \
-    bluez-tools \
-    blueman \
-    alsa-utils \
-    dbus \
-    ofono \
-    modem-manager
+sudo apt-get install -y pulseaudio pulseaudio-module-bluetooth bluez
+sudo apt-get install -y bluez-tools ofono modem-manager alsa-utils dbus
+sudo apt-get install -y libdbus-1-dev libcurl4-openssl-dev libjson-c-dev
+sudo apt-get install -y libsdl2-dev libsdl2-image-dev
 
 echo -e "${GREEN}✓ Packages installed${NC}"
 echo ""
@@ -87,14 +81,39 @@ sudo systemctl restart bluetooth
 echo -e "${GREEN}✓ Bluetooth configured${NC}"
 echo ""
 
-# Step 4: Configure rfcomm for navigation
-echo -e "${BLUE}Step 4: Setting up navigation rfcomm device...${NC}"
+# Step 4: Configure RFCOMM daemon for navigation
+echo -e "${BLUE}Step 4: Setting up RFCOMM daemon for navigation...${NC}"
 
-# Create rfcomm binding for navigation (device address would be set later)
-echo "Note: rfcomm will be bound when you pair your phone"
-echo "The navigation device should be at /dev/rfcomm1"
+# Copy nav-bind daemon script
+DAEMON_SCRIPT="$(dirname "$0")/nav-bind-daemon.sh"
+if [ -f "$DAEMON_SCRIPT" ]; then
+    sudo cp "$DAEMON_SCRIPT" /usr/local/bin/nav-bind-daemon.sh
+    sudo chmod +x /usr/local/bin/nav-bind-daemon.sh
+    echo "✓ nav-bind-daemon.sh copied to /usr/local/bin/"
+else
+    echo "Warning: nav-bind-daemon.sh not found in $(dirname "$0")"
+fi
 
-echo -e "${GREEN}✓ rfcomm ready${NC}"
+# Create systemd service for nav-bind daemon
+sudo tee /etc/systemd/system/nav-bind.service > /dev/null << 'EOF'
+[Unit]
+Description=RFCOMM auto-bind daemon for NavJsonService
+After=bluetooth.target
+Wants=bluetooth.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/nav-bind-daemon.sh
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+echo -e "${GREEN}✓ RFCOMM daemon installed as systemd service${NC}"
+echo "Note: The phone MAC is automatically detected from main.c"
+echo "      and stored in /tmp/connected_phone_mac.txt"
 echo ""
 
 # Step 5: Configure oFono for calls
@@ -110,8 +129,21 @@ fi
 echo -e "${GREEN}✓ oFono configured${NC}"
 echo ""
 
-# Step 6: Create startup script
-echo -e "${BLUE}Step 6: Creating startup script...${NC}"
+# Step 6: Enable nav-bind service to start automatically
+echo -e "${BLUE}Step 6: Enabling services to start at boot...${NC}"
+
+sudo systemctl daemon-reload
+sudo systemctl enable nav-bind.service
+sudo systemctl start nav-bind.service
+
+echo "✓ Services enabled:"
+echo "  - nav-bind.service (RFCOMM daemon)"
+echo "  - ofono.service (phone calls)"
+echo "  - bluetooth.service (Bluetooth)"
+echo ""
+
+# Step 7: Create startup script
+echo -e "${BLUE}Step 7: Creating dashboard startup script...${NC}"
 
 sudo tee /etc/systemd/system-user/dashboard.service > /dev/null << 'EOF'
 [Unit]
@@ -132,28 +164,47 @@ EOF
 echo -e "${GREEN}✓ Startup script created${NC}"
 echo ""
 
-# Step 7: Summary
+# Step 8: Summary
 echo "=========================================="
 echo -e "${GREEN}Setup Complete!${NC}"
 echo "=========================================="
 echo ""
-echo "Next steps:"
+echo "System components installed:"
+echo "  ✓ Bluetooth audio (pulseaudio)"
+echo "  ✓ Phone calls (oFono)"
+echo "  ✓ Navigation daemon (nav-bind-daemon.sh)"
+echo "  ✓ All required libraries"
 echo ""
-echo "1. Run the dashboard:"
+echo "Automatic features:"
+echo "  ✓ Phone MAC detection (main.c writes to /tmp/connected_phone_mac.txt)"
+echo "  ✓ RFCOMM binding (nav-bind daemon auto-configures)"
+echo "  ✓ Services auto-restart on crash"
+echo ""
+echo "Next steps to start the dashboard:"
+echo ""
+echo "1. Compile the dashboard:"
+echo -e "${BLUE}   cd lv_port_pc_vscode && rm -rf build && mkdir build && cd build"
+echo "   cmake .. && make -j4${NC}"
+echo ""
+echo "2. Start the dashboard:"
 echo -e "${BLUE}   /home/pi5/dashboard/lv_port_pc_vscode/bin/main${NC}"
 echo ""
-echo "2. Click the blue 'Pair' button in the dashboard"
-echo ""
-echo "3. On your phone:"
-echo "   - Open Bluetooth settings"
+echo "3. Pair your phone:"
+echo "   - Click the blue 'Pair' button in the dashboard"
+echo "   - On your phone, go to Bluetooth settings"
 echo "   - Find and tap 'raspberrypi'"
 echo "   - Confirm pairing"
 echo ""
-echo "4. After pairing:"
-echo "   - Music will play through phone speaker"
-echo "   - Calls will use phone microphone/speaker"
-echo "   - Navigation will work automatically"
+echo "4. Start navigation:"
+echo "   - Install NavRelay on your Android phone"
+echo "   - Open NavRelay and click 'Start'"
+echo "   - Open Google Maps and start navigation"
+echo ""
+echo "5. Verify all services are running:"
+echo -e "${BLUE}   sudo systemctl status bluetooth.service"
+echo "   sudo systemctl status ofono.service"
+echo "   sudo systemctl status nav-bind.service${NC}"
 echo ""
 echo "=========================================="
-echo -e "${YELLOW}Important: All Bluetooth audio devices should now be configured!${NC}"
+echo -e "${YELLOW}Documentation: see docs/DOCUMENTATION_TECHNIQUE_COMPLETE.tex${NC}"
 echo "=========================================="

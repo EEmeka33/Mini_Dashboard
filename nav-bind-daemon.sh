@@ -1,10 +1,35 @@
 #!/usr/bin/env bash
 
-PHONE_MAC="2C:BE:EB:7F:2D:FA"
+# Default MAC (fallback if file doesn't exist)
+DEFAULT_PHONE_MAC="2C:BE:EB:7F:2D:FB"
+
+# Read from file written by main.c if available
+MAC_FILE="/tmp/connected_phone_mac.txt"
+if [ -f "$MAC_FILE" ]; then
+    PHONE_MAC=$(cat "$MAC_FILE" 2>/dev/null)
+    if [ -z "$PHONE_MAC" ]; then
+        PHONE_MAC="$DEFAULT_PHONE_MAC"
+    fi
+else
+    PHONE_MAC="$DEFAULT_PHONE_MAC"
+fi
+
 TARGET_SERVICE_NAME="NavJsonService"
 LOG_TAG="[nav-bind]"
 
+# Log which MAC is being used
+echo "$LOG_TAG Using phone MAC: $PHONE_MAC"
+
 while true; do
+  # Re-read MAC from file if it changed (in case phone was reconnected)
+  if [ -f "$MAC_FILE" ]; then
+    CURRENT_MAC=$(cat "$MAC_FILE" 2>/dev/null)
+    if [ -n "$CURRENT_MAC" ] && [ "$CURRENT_MAC" != "$PHONE_MAC" ]; then
+        echo "$LOG_TAG Detected new phone MAC, switching from $PHONE_MAC to $CURRENT_MAC"
+        PHONE_MAC="$CURRENT_MAC"
+    fi
+  fi
+
   echo "$LOG_TAG checking RFCOMM binding..."
 
   # Récupère éventuellement la ligne rfcomm1 existante
