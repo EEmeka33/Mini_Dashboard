@@ -50,19 +50,19 @@ cd Mini_Dashboard
   \emph{Note:} L'option \texttt{--recursive} remplace les deux commandes separees
   \texttt{git submodule update --init --recursive}, simplifiant le processus.
   
-  \item \textbf{Installation et configuration automatisee (SETUP.sh)}
+  \item \textbf{Installation et configuration automatisée (SETUP.sh)}
   \begin{lstlisting}[style=bashcode]
 bash SETUP.sh
   \end{lstlisting}
   Duree: ~5-10 minutes. Installe paquets, configure services systemd et le daemon RFCOMM.
   
   Le script installe et active automatiquement :
-  \begin{itemize}
-    \item \\texttt{bluetooth.service} pour BlueZ
-    \item \\texttt{ofono.service} pour les appels HFP
-    \item \\texttt{nav-bind.service} pour le daemon RFCOMM (nouvelle feature)
-    \item \\texttt{pulseaudio} pour la musique Bluetooth
-  \end{itemize}
+\begin{itemize}
+    \item \texttt{bluetooth.service} pour BlueZ
+    \item \texttt{ofono.service} pour les appels HFP
+    \item \texttt{nav-bind.service} pour le daemon RFCOMM (nouvelle feature)
+    \item \texttt{pulseaudio} pour la musique Bluetooth
+\end{itemize}
   
   \item \textbf{Compiler le dashboard}
   \begin{lstlisting}[style=bashcode]
@@ -74,41 +74,38 @@ cmake ..
 make -j4
   \end{lstlisting}
   
-  \item \textbf{Verifier que les services systemd tournent}
+  \item \textbf{Vérifier que les services système tournent}
   \begin{lstlisting}[style=bashcode]
 sudo systemctl status bluetooth.service
 sudo systemctl status ofono.service
 sudo systemctl status nav-bind.service
   \end{lstlisting}
   Tous les trois doivent montrer \texttt{active (running)}.
+
+  \item \textbf{Lancer le fichier compilé :}
+  \begin{lstlisting}[style=bashcode]
+cd lv_port_pc_vscode/bin/
+./main
+  \end{lstlisting}
+  
 \end{enumerate}
 
-\subsection{Guide d'utilisation quotidienne}
-
-Consulter \texttt{QUICK\_START.md} pour :
-\begin{itemize}
-  \item Demarrer le dashboard apres installation
-  \item Rendre le Pi discoverable (Pair Button)
-  \item Appairer le telephone via l'interface Bluetooth du Pi
-  \item Verifier que la musique, les appels et la navigation fonctionnent
-  \item Interpretation des logs de daemon : \texttt{journalctl -u nav-bind.service -f}
-\end{itemize}
 
 \newpage
 
 %% ===========================================================================
-\section{Vue d'ensemble du systeme}
+\section{Vue d'ensemble du système}
 %% ===========================================================================
 
-Le projet Mini Dashboard est un tableau de bord automobile embarque tournant sur Raspberry Pi~5
-sous un ecran circulaire $1080\times1080$ pixels. Il agrege trois flux de donnees en temps reel :
+Le projet Mini Dashboard est un tableau de bord automobile embarqué tournant sur Raspberry Pi~5
+Sous un écran circulaire $1080\times1080$ pixels. Il agrège trois flux de données en temps réel :
 
 \begin{itemize}
-  \item \textbf{Navigation} : donnees de Google Maps relayees depuis un smartphone Android via
+  \item \textbf{Navigation} : données de Google Maps relayées depuis un smartphone Android via
     Bluetooth RFCOMM (profil SPP), lues sur \texttt{/dev/rfcomm1} sous forme de lignes JSON.
-  \item \textbf{Musique Bluetooth} : metadonnees A2DP/AVRCP et jaquette, obtenues par D-Bus via
+  \item \textbf{Musique Bluetooth} : métadonnées A2DP/AVRCP et jaquette, obtenues par D-Bus via
     \texttt{org.bluez.MediaPlayer1}.
-  \item \textbf{Appels HFP} : detection et gestion des appels entrants via oFono et
+  \item \textbf{Appels HFP} : détection et gestion des appels entrants via oFono et
     \texttt{org.ofono.VoiceCallManager}.
 \end{itemize}
 
@@ -131,7 +128,7 @@ Profil HFP & D-Bus systeme & \texttt{org.ofono.VoiceCall} \\
 \end{tabular}
 \end{center}
 
-\subsection{Prerequis materiels et logiciels}
+\subsection{Prérequis matériels et logiciels}
 
 \begin{itemize}
   \item Raspberry Pi~5 avec Raspberry Pi OS Bookworm (64-bit recommande)
@@ -147,7 +144,7 @@ sudo apt update && sudo apt install -y \
   build-essential cmake git pkg-config
 \end{lstlisting}
 
-\subsubsection{Paquets runtime et dependances}
+\subsubsection{Paquets intime et dépendances}
 
 \begin{lstlisting}[style=bashcode]
 sudo apt update
@@ -168,16 +165,15 @@ sudo apt install -y libdbus-1-dev libcurl4-openssl-dev libjson-c-dev
 sudo apt install -y libsdl2-dev libsdl2-image-dev
 \end{lstlisting}
 
-\subsubsection{Installation automatisee (RECOMMANDÉE)}
+\subsubsection{Installation automatisée (RECOMMANDÉE)}
 
-Tous les paquets et configurations ci-dessus sont appliques automatiquement par :
+Tous les paquets et configurations ci-dessus sont appliqués automatiquement :
 
 \begin{lstlisting}[style=bashcode]
 bash /home/pi5/dashboard/SETUP.sh
 \end{lstlisting}
 
-Ce script prend 5-10 minutes et configure egalement les services systemd
-dans les bonnes conditions.
+Ce script prend 5-10 minutes et configure également les services systemd dans les bonnes conditions.
 
 %% ===========================================================================
 \section{Compilation et mise en place du projet LVGL}
@@ -251,7 +247,7 @@ Ligne pour afficher l'application en Fullscreen :
 \end{lstlisting}
 
 
-\subsection{Compilation complete avec CMake (RECOMMANDeE)}
+\subsection{Compilation complete avec CMake (RECOMMANDÉE)}
 
 \begin{lstlisting}[style=bashcode]
 cd lv_port_vscode
@@ -268,7 +264,7 @@ Ou en une seule ligne :
 cd lv_port_vscode && rm -rf build && mkdir build && cd build && cmake .. && make -j4
 \end{lstlisting}
 
-L'executable sera cree à \texttt{bin/main}.
+L'exécutable sera créé à \texttt{bin/main}.
 
 \subsection{Compilation manuelle (alternative)}
 
@@ -323,7 +319,7 @@ static inline int bluetooth_pair_device_start(void)
     pid_t pid = fork();
     if (pid == 0) {
         setsid();  /* Detache de la session parente */
-        execv("/bin/bash", ...);
+        execv("/bin/bash", ...);    
         exit(0);
     }
     return (pid > 0) ? 0 : -1;
@@ -346,7 +342,7 @@ Ce script s'execute en arriere-plan, sans bloquer l'UI du dashboard.
 
 \subsection{Appairage initial du telephone}
 
-\subsubsection{Methode 1 : Via le boutton Pair du dashboard (RECOMMANDEE)}
+\subsubsection{Methode 1 : Via le boutton Pair du dashboard (RECOMMANDÉE)}
 
 \begin{enumerate}
   \item \textbf{Lancer le dashboard} : \texttt{./bin/main} depuis \texttt{lv\_port\_pc\_vscode/build}
