@@ -846,6 +846,7 @@ static void update_nav_display(void)
         lv_label_set_text(g_nav_label, "Waiting for route...");
     }
 
+    /* Show distance */
     static char dist_buf[64];
     if (g_state.nav.distance > 1000) {
         snprintf(dist_buf, sizeof(dist_buf), "%.1f km", g_state.nav.distance / 1000.0);
@@ -854,18 +855,11 @@ static void update_nav_display(void)
     }
     lv_label_set_text(g_nav_dist_label, dist_buf);
 
-    if (g_state.nav.speed > 0) {
-        static char speed_buf[64];
-        snprintf(speed_buf, sizeof(speed_buf), "%.0f km/h", g_state.nav.speed);
-        lv_label_set_text(g_nav_street_label, speed_buf);
-    } else {
-        lv_label_set_text(g_nav_street_label, "--");
-    }
-
+    /* Show street name only if available (no Unknown Street fallback) */
     if (g_state.nav.street_name[0]) {
         lv_label_set_text(g_nav_street_label, g_state.nav.street_name);
     } else {
-        lv_label_set_text(g_nav_street_label, "Unknown Street");
+        lv_label_set_text(g_nav_street_label, "");
     }
 
     pthread_mutex_unlock(&g_state.lock);
