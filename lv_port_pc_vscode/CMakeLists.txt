@@ -75,7 +75,7 @@ add_compile_definitions($<$<BOOL:${LV_USE_FFMPEG}>:LV_USE_FFMPEG=1>)
 
 # Add LVGL subdirectory
 add_subdirectory(lvgl)
-target_include_directories(lvgl PUBLIC ${PROJECT_SOURCE_DIR} ${SDL2_INCLUDE_DIRS} ${DBUS_INCLUDE_DIRS} ${JSON_C_INCLUDE_DIRS} ${CURL_INCLUDE_DIRS} ${PROJECT_SOURCE_DIR}/lvgl/src/libs/thorvg)
+target_include_directories(lvgl PUBLIC ${PROJECT_SOURCE_DIR} ${SDL2_INCLUDE_DIRS} ${DBUS_INCLUDE_DIRS} ${JSON_C_INCLUDE_DIRS} ${CURL_INCLUDE_DIRS})
 
 set(MAIN_SOURCES src/mouse_cursor_icon.c src/hal/hal.c src/album_art.c src/speedo_interactive.c)
 set(MAIN_LIBS lvgl lvgl::examples lvgl::demos lvgl::thorvg ${SDL2_LIBRARIES} ${DBUS_LIBRARIES} ${JSON_C_LIBRARIES} ${CURL_LIBRARIES})
