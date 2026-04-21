@@ -29,7 +29,7 @@ fi
 echo -e "${BLUE}Step 1: Installing required packages...${NC}"
 sudo apt-get update
 sudo apt-get install -y pulseaudio pulseaudio-module-bluetooth bluez
-sudo apt-get install -y bluez-tools ofono modem-manager alsa-utils dbus
+sudo apt-get install -y bluez-tools ofono modemmanager alsa-utils dbus
 sudo apt-get install -y libdbus-1-dev libcurl4-openssl-dev libjson-c-dev
 sudo apt-get install -y libsdl2-dev libsdl2-image-dev
 
