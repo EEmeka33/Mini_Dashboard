@@ -976,6 +976,9 @@ static void on_btn_pair_device_clicked(lv_event_t *e)
     if (bluetooth_pair_device_start() == 0) {
         fprintf(stderr, "[UI] Discoverable mode activated\n");
         lv_label_set_text(g_pair_status_label, "Made Discoverable");
+        
+        /* Save the currently connected phone MAC to file for the daemon */
+        save_connected_phone_mac();
     } else {
         fprintf(stderr, "[UI] Failed to activate discoverable\n");
         lv_label_set_text(g_pair_status_label, "Error");

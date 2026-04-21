@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <curl/curl.h>
 
 /* -------- Helpers mémoire pour libcurl -------- */
@@ -140,7 +141,15 @@ int download_itunes_cover(const char *artist, const char *album, const char *out
 
     printf("Artwork URL: %s\n", art_url);
 
-    /* Deuxième requête : télécharger l’image */
+    /* Deuxième requête : télécharger l’image */    /* Ensure directory exists by creating it if needed */
+    char dir_path[512];
+    snprintf(dir_path, sizeof(dir_path), "%s", out_path);
+    char *last_slash = strrchr(dir_path, '/');
+    if (last_slash) {
+        *last_slash = '\0';
+        /* Try to create directory (OK if it already exists) */
+        mkdir(dir_path, 0755);
+    }
     FILE *f = fopen(out_path, "wb");
     if (!f) {
         perror("fopen");

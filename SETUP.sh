@@ -29,7 +29,9 @@ fi
 echo -e "${BLUE}Step 1: Installing required packages...${NC}"
 sudo apt-get update
 sudo apt-get install -y pulseaudio pulseaudio-module-bluetooth bluez
-sudo apt-get install -y bluez-tools ofono modemmanager alsa-utils dbus
+sudo apt-get install -y bluez-tools alsa-utils dbus
+# Note: ofono and modemmanager conflict - we choose ofono for HFP phone calls
+sudo apt-get install -y ofono
 sudo apt-get install -y libdbus-1-dev libcurl4-openssl-dev libjson-c-dev
 sudo apt-get install -y libsdl2-dev libsdl2-image-dev
 
@@ -119,14 +121,14 @@ echo ""
 # Step 5: Configure oFono for calls
 echo -e "${BLUE}Step 5: Configuring oFono for phone calls...${NC}"
 
-if systemctl is-enabled oFono &> /dev/null || systemctl is-enabled ofono &> /dev/null; then
-    echo "oFono service found and enabled"
-    sudo systemctl restart ofono
+# Enable ofono if available (it may not be in all Debian versions)
+if apt-cache show ofono >/dev/null 2>&1; then
+    sudo systemctl enable ofono.service 2>/dev/null || true
+    sudo systemctl restart ofono.service 2>/dev/null || true
+    echo -e "${GREEN}✓ oFono configured${NC}"
 else
-    echo "Note: oFono not enabled. Will configure when phone connects."
+    echo "Note: oFono not available in this Debian version - phone calls may not work"
 fi
-
-echo -e "${GREEN}✓ oFono configured${NC}"
 echo ""
 
 # Step 6: Enable nav-bind service to start automatically
@@ -135,30 +137,32 @@ echo -e "${BLUE}Step 6: Enabling services to start at boot...${NC}"
 sudo systemctl daemon-reload
 sudo systemctl enable nav-bind.service
 sudo systemctl start nav-bind.service
+sudo systemctl enable bluetooth.service
 
 echo "✓ Services enabled:"
 echo "  - nav-bind.service (RFCOMM daemon)"
-echo "  - ofono.service (phone calls)"
 echo "  - bluetooth.service (Bluetooth)"
 echo ""
 
-# Step 7: Create startup script
+# Step 7: Create user startup script for dashboard
 echo -e "${BLUE}Step 7: Creating dashboard startup script...${NC}"
 
-sudo tee /etc/systemd/system-user/dashboard.service > /dev/null << 'EOF'
+# Create user systemd directory if it doesn't exist
+mkdir -p ~/.config/systemd/user
+
+tee ~/.config/systemd/user/dashboard.service > /dev/null << 'EOF'
 [Unit]
 Description=Raspberry Pi Dashboard
 After=bluetooth.target pulseaudio.service
 
 [Service]
 Type=simple
-User=pi5
 ExecStart=/home/pi5/dashboard/lv_port_pc_vscode/bin/main
 Restart=on-failure
 RestartSec=5
 
 [Install]
-WantedBy=graphical-session.target
+WantedBy=default.target
 EOF
 
 echo -e "${GREEN}✓ Startup script created${NC}"
