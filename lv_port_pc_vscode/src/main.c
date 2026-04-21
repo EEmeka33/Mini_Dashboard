@@ -562,8 +562,17 @@ static void *music_thread_fn(void *arg)
     char last_title[256] = "";
     char last_artist[256] = "";
     char last_album[256] = "";
+    time_t last_mac_check = 0;
 
     while (1) {
+        time_t now = time(NULL);
+        
+        /* Check for connected devices every 5 seconds */
+        if (now - last_mac_check >= 5) {
+            save_connected_phone_mac();
+            last_mac_check = now;
+        }
+
         pthread_mutex_lock(&g_state.lock);
         if (dbus_conn && player_path[0]) {
             if (get_music_properties()) {
@@ -976,9 +985,6 @@ static void on_btn_pair_device_clicked(lv_event_t *e)
     if (bluetooth_pair_device_start() == 0) {
         fprintf(stderr, "[UI] Discoverable mode activated\n");
         lv_label_set_text(g_pair_status_label, "Made Discoverable");
-        
-        /* Save the currently connected phone MAC to file for the daemon */
-        save_connected_phone_mac();
     } else {
         fprintf(stderr, "[UI] Failed to activate discoverable\n");
         lv_label_set_text(g_pair_status_label, "Error");

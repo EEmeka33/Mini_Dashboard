@@ -28,10 +28,14 @@ fi
 # Step 1: Install required packages
 echo -e "${BLUE}Step 1: Installing required packages...${NC}"
 sudo apt-get update
+# Build tools
+sudo apt-get install -y build-essential cmake git pkg-config
+# Audio and Bluetooth
 sudo apt-get install -y pulseaudio pulseaudio-module-bluetooth bluez
 sudo apt-get install -y bluez-tools alsa-utils dbus
-# Note: ofono and modemmanager conflict - we choose ofono for HFP phone calls
+# Phone calls (HFP)
 sudo apt-get install -y ofono
+# Development libraries
 sudo apt-get install -y libdbus-1-dev libcurl4-openssl-dev libjson-c-dev
 sudo apt-get install -y libsdl2-dev libsdl2-image-dev
 
