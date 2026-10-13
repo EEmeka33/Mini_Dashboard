@@ -62,24 +62,29 @@ echo ""
 # Step 3: Configure Bluetooth
 echo -e "${BLUE}Step 3: Configuring Bluetooth daemon...${NC}"
 
-# Update Bluetooth config for A2DP (audio) and HFP (calls)
+# Update Bluetooth config (cles valides BlueZ 5 uniquement)
+# Sauvegarde de l'ancien fichier une seule fois
+[ -f /etc/bluetooth/main.conf.orig ] || sudo cp /etc/bluetooth/main.conf /etc/bluetooth/main.conf.orig 2>/dev/null || true
 sudo tee /etc/bluetooth/main.conf > /dev/null << 'EOF'
 [General]
-# Enable A2DP source (for phone to send audio to Pi)
-Enable=Source
+# Classe "Car audio" : le telephone voit le Pi comme un autoradio
+Class = 0x200420
+# Fenetre d'appairage ouverte par le bouton Pair du dashboard (secondes)
+DiscoverableTimeout = 180
+PairableTimeout = 0
+# Re-appairage sans confirmation si le telephone a "oublie" le Pi
+JustWorksRepairing = always
+FastConnectable = true
 
-# Enable HFP audio gateway (for hands-free calls)
-HandsfreeDevice=true
-
-# Trustable devices
-Trustable=true
-
-# Profile whitelisting
-DisabledPlugins=pnat,media_provider
-
-[LE]
-# Enable Low Energy audio
+[Policy]
+# Adaptateur allume au demarrage + reconnexion auto au telephone connu
+AutoEnable = true
+ReconnectAttempts = 7
+ReconnectIntervals = 1,2,4,8,16,32,64
 EOF
+
+# Droits : D-Bus BlueZ (agent d'appairage) et /dev/rfcomm1
+sudo usermod -aG bluetooth,dialout pi5
 
 # Restart Bluetooth to apply config
 sudo systemctl restart bluetooth
@@ -162,8 +167,11 @@ After=bluetooth.target pulseaudio.service
 [Service]
 Type=simple
 ExecStart=/home/pi5/dashboard/lv_port_pc_vscode/bin/main
+Environment=DISPLAY=:0
 Restart=on-failure
 RestartSec=5
+# Le dashboard gere SIGTERM proprement ; au-dela de 10 s systemd force
+TimeoutStopSec=10
 
 [Install]
 WantedBy=default.target
@@ -197,11 +205,11 @@ echo ""
 echo "2. Start the dashboard:"
 echo -e "${BLUE}   /home/pi5/dashboard/lv_port_pc_vscode/bin/main${NC}"
 echo ""
-echo "3. Pair your phone:"
-echo "   - Click the blue 'Pair' button in the dashboard"
+echo "3. Pair your phone (no popup on the Pi):"
+echo "   - Click the blue 'Pair' button in the dashboard (3 min window)"
 echo "   - On your phone, go to Bluetooth settings"
-echo "   - Find and tap 'raspberrypi'"
-echo "   - Confirm pairing"
+echo "   - Find and tap 'raspberrypi', accept on the phone only"
+echo "   - Log out / reboot once so the new groups (bluetooth, dialout) apply"
 echo ""
 echo "4. Start navigation:"
 echo "   - Install NavRelay on your Android phone"

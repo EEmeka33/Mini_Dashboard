@@ -65,7 +65,7 @@ int download_itunes_cover(const char *artist, const char *album, const char *out
     struct Memory mem = {0};
     int ok = 0;
 
-    curl_global_init(CURL_GLOBAL_DEFAULT);
+    /* curl_global_init() est fait une seule fois dans main() (non thread-safe) */
     curl = curl_easy_init();
     if (!curl) {
         fprintf(stderr, "curl_easy_init failed\n");
@@ -95,6 +95,9 @@ int download_itunes_cover(const char *artist, const char *album, const char *out
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_to_memory);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&mem);
+    curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);          /* obligatoire en multi-thread */
+    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 5L);    /* pas de blocage sans reseau */
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
 
     res = curl_easy_perform(curl);
     if (res != CURLE_OK) {
@@ -150,7 +153,11 @@ int download_itunes_cover(const char *artist, const char *album, const char *out
         /* Try to create directory (OK if it already exists) */
         mkdir(dir_path, 0755);
     }
-    FILE *f = fopen(out_path, "wb");
+    /* On ecrit dans un fichier temporaire puis rename() : l'UI ne lit jamais
+     * une image a moitie telechargee. */
+    char tmp_path[600];
+    snprintf(tmp_path, sizeof(tmp_path), "%s.part", out_path);
+    FILE *f = fopen(tmp_path, "wb");
     if (!f) {
         perror("fopen");
         free(art_url);
@@ -164,6 +171,10 @@ int download_itunes_cover(const char *artist, const char *album, const char *out
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_to_file);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, f);
+    curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 5L);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 15L);
+    curl_easy_setopt(curl, CURLOPT_FAILONERROR, 1L);
 
     res = curl_easy_perform(curl);
     fclose(f);
@@ -172,6 +183,13 @@ int download_itunes_cover(const char *artist, const char *album, const char *out
     if (res != CURLE_OK) {
         fprintf(stderr, "curl_easy_perform (image) failed: %s\n",
                 curl_easy_strerror(res));
+        remove(tmp_path);
+        goto cleanup;
+    }
+
+    if (rename(tmp_path, out_path) != 0) {
+        perror("rename cover");
+        remove(tmp_path);
         goto cleanup;
     }
 
@@ -180,7 +198,6 @@ int download_itunes_cover(const char *artist, const char *album, const char *out
 
 cleanup:
     if (curl) curl_easy_cleanup(curl);
-    curl_global_cleanup();
     free(mem.data);
     return ok;
 }
