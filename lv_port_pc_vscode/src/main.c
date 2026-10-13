@@ -308,6 +308,15 @@ static void nav_handle_line(char *line)
     g_state.nav = nav;
     g_state.nav_connected = 1;
     pthread_mutex_unlock(&g_state.lock);
+
+    /* Log comme avant (uniquement quand ca change, pour ne pas inonder le terminal) */
+    static char last_log[400] = "";
+    char cur[400];
+    snprintf(cur, sizeof(cur), "%.0f m | %s | %s", nav.distance, nav.instruction, nav.eta);
+    if (strcmp(cur, last_log) != 0) {
+        fprintf(stderr, "Nav updated: %s\n", cur);
+        snprintf(last_log, sizeof(last_log), "%s", cur);
+    }
 }
 
 static void *nav_thread_fn(void *arg)

@@ -2,6 +2,7 @@ package com.example.navrelay
 
 import android.annotation.SuppressLint
 import android.app.Notification
+import android.content.ComponentName
 import android.content.Context
 import android.location.Location
 import android.location.LocationListener
@@ -50,6 +51,12 @@ class MapsNotificationListener :
 
         // Separateurs entre distance et instruction : "300 m · Tournez", "300 m - Tournez"
         private val LEADING_SEP_RE = Regex("""^[\s  ·•\-–—,:]+""")
+
+        /** Lu par MainActivity pour afficher l'etat */
+        @Volatile var connected: Boolean = false
+            private set
+        @Volatile var lastParsed: String = ""
+            private set
     }
 
     private var lastSpeedKmh: Double = 0.0
@@ -60,6 +67,19 @@ class MapsNotificationListener :
     override fun onCreate() {
         super.onCreate()
         requestLocationUpdates()
+    }
+
+    override fun onListenerConnected() {
+        super.onListenerConnected()
+        connected = true
+        Log.i(TAG, "Notification listener bound")
+    }
+
+    override fun onListenerDisconnected() {
+        super.onListenerDisconnected()
+        connected = false
+        Log.w(TAG, "Notification listener unbound, asking Android to rebind")
+        requestRebind(ComponentName(this, MapsNotificationListener::class.java))
     }
 
     @SuppressLint("MissingPermission")
@@ -117,8 +137,12 @@ class MapsNotificationListener :
 
         val eta = etaLines.firstOrNull().orEmpty()
 
-        // Pas d'action ni de distance (ex : notification "Navigation en cours") -> on ignore
-        if (nextAction.isEmpty() && distanceM < 0) return
+        // Filet de securite : si le classement n'a rien trouve, on revient a
+        // l'ancien comportement (premiere ligne) plutot que de ne rien envoyer.
+        if (nextAction.isEmpty() && distanceM < 0) {
+            nextAction = stripLeadingDistance(navLines.firstOrNull() ?: candidates.first())
+            Log.w(TAG, "Unrecognised Maps layout, fallback action='$nextAction'")
+        }
 
         val json = JSONObject()
         json.put("timestamp", System.currentTimeMillis() / 1000)
@@ -132,6 +156,8 @@ class MapsNotificationListener :
         val key = "$nextAction|$distanceM|$eta"
         if (key != lastSentKey) Log.i(TAG, "-> next='$nextAction' dist=$distanceM eta='$eta'")
         lastSentKey = key
+        lastParsed = "action: $nextAction\ndistance: " +
+                (if (distanceM >= 0) "$distanceM m" else "?") + "\nETA: $eta"
 
         NavServer.send(json)
     }
