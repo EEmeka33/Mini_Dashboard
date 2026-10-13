@@ -61,6 +61,7 @@ typedef struct {
     double distance;            /* Distance in meters */
     double next_distance;       /* Distance to next maneuver */
     char street_name[256];      /* Current street */
+    char eta[128];              /* "12 min · 4,5 km · Arrivee a 14:32" */
     double speed;               /* Current speed km/h */
     double lat;                 /* Current latitude */
     double lon;                 /* Current longitude */
@@ -262,10 +263,14 @@ static int parse_nav_json(const char *json_line, nav_info_t *nav)
     if (json_object_object_get_ex(obj, "next_action", &tmp))
         copy_str(nav->instruction, sizeof(nav->instruction), json_object_get_string(tmp));
 
+    /* -1 = distance inconnue (NavRelay n'a pas trouve de distance) */
     if (json_object_object_get_ex(obj, "distance_to_next_m", &tmp)) {
         nav->distance = json_object_get_double(tmp);
         nav->next_distance = nav->distance;
     }
+
+    if (json_object_object_get_ex(obj, "eta", &tmp))
+        copy_str(nav->eta, sizeof(nav->eta), json_object_get_string(tmp));
 
     if (json_object_object_get_ex(obj, "street_name", &tmp))
         copy_str(nav->street_name, sizeof(nav->street_name), json_object_get_string(tmp));
@@ -915,32 +920,101 @@ static void *calls_thread_fn(void *arg)
 
 /* ========== UI UPDATE FUNCTIONS (thread UI uniquement, copies locales) ========== */
 
+/* Les polices Montserrat integrees a LVGL ne contiennent que l'ASCII :
+ * "Tournez à droite" s'afficherait "Tournez  droite". On remplace donc les
+ * caracteres accentues par leur equivalent sans accent pour l'affichage.
+ * (Alternative : generer une police avec accents via lvgl.io/tools/fontconverter) */
+static void fold_to_ascii(const char *in, char *out, size_t len)
+{
+    size_t o = 0;
+    const unsigned char *p = (const unsigned char *)in;
+
+    while (*p && o + 3 < len) {
+        unsigned int cp;
+        int n;
+        if (p[0] < 0x80)                       { cp = p[0]; n = 1; }
+        else if ((p[0] & 0xE0) == 0xC0 && p[1]) { cp = ((p[0] & 0x1F) << 6) | (p[1] & 0x3F); n = 2; }
+        else if ((p[0] & 0xF0) == 0xE0 && p[1] && p[2])
+            { cp = ((p[0] & 0x0F) << 12) | ((p[1] & 0x3F) << 6) | (p[2] & 0x3F); n = 3; }
+        else if ((p[0] & 0xF8) == 0xF0 && p[1] && p[2] && p[3]) { cp = 0xFFFD; n = 4; }
+        else { p++; continue; }               /* octet invalide */
+        p += n;
+
+        const char *r = NULL;
+        char one[2] = { 0, 0 };
+        if (cp < 0x80) { one[0] = (char)cp; r = one; }
+        else switch (cp) {
+            case 0xE0: case 0xE1: case 0xE2: case 0xE3: case 0xE4: case 0xE5: r = "a"; break;
+            case 0xC0: case 0xC1: case 0xC2: case 0xC3: case 0xC4: case 0xC5: r = "A"; break;
+            case 0xE8: case 0xE9: case 0xEA: case 0xEB: r = "e"; break;
+            case 0xC8: case 0xC9: case 0xCA: case 0xCB: r = "E"; break;
+            case 0xEC: case 0xED: case 0xEE: case 0xEF: r = "i"; break;
+            case 0xCC: case 0xCD: case 0xCE: case 0xCF: r = "I"; break;
+            case 0xF2: case 0xF3: case 0xF4: case 0xF5: case 0xF6: r = "o"; break;
+            case 0xD2: case 0xD3: case 0xD4: case 0xD5: case 0xD6: r = "O"; break;
+            case 0xF9: case 0xFA: case 0xFB: case 0xFC: r = "u"; break;
+            case 0xD9: case 0xDA: case 0xDB: case 0xDC: r = "U"; break;
+            case 0xE7: r = "c"; break;
+            case 0xC7: r = "C"; break;
+            case 0xF1: r = "n"; break;
+            case 0xD1: r = "N"; break;
+            case 0xFF: r = "y"; break;
+            case 0xDF: r = "ss"; break;
+            case 0x153: r = "oe"; break;
+            case 0x152: r = "OE"; break;
+            case 0xE6: r = "ae"; break;
+            case 0xA0: case 0x202F: case 0x2009: case 0x2002: case 0x2003: r = " "; break;
+            case 0x2018: case 0x2019: case 0x2032: r = "'"; break;
+            case 0x201C: case 0x201D: case 0xAB: case 0xBB: r = "\""; break;
+            case 0xB7: case 0x2022: r = "-"; break;     /* "12 min · 4 km" */
+            case 0x2013: case 0x2014: r = "-"; break;
+            case 0x2026: r = "..."; break;
+            case 0xB0: r = "o"; break;
+            default: r = ""; break;                       /* emoji, etc. : ignore */
+        }
+        while (*r && o + 1 < len) out[o++] = *r++;
+    }
+    out[o] = '\0';
+}
+
+/* Comme label_set_if_changed, mais avec repli ASCII pour les polices LVGL */
+static void label_set_text_ascii(lv_obj_t *label, const char *text)
+{
+    char buf[512];
+    fold_to_ascii(text, buf, sizeof(buf));
+    label_set_if_changed(label, buf);
+}
+
 static void update_nav_display(const nav_info_t *nav, int connected)
 {
     char dist_buf[64];
 
     if (nav->instruction[0])
-        label_set_if_changed(g_nav_label, nav->instruction);
+        label_set_text_ascii(g_nav_label, nav->instruction);
     else
         label_set_if_changed(g_nav_label, connected ? "Waiting for route..." : "No Navigation");
 
-    if (nav->distance >= 1000)
+    int have_route = nav->instruction[0] || nav->eta[0];
+    if (!have_route || nav->distance < 0)
+        snprintf(dist_buf, sizeof(dist_buf), "-- m");        /* distance inconnue */
+    else if (nav->distance >= 1000)
         snprintf(dist_buf, sizeof(dist_buf), "%.1f km", nav->distance / 1000.0);
-    else if (nav->instruction[0])
-        snprintf(dist_buf, sizeof(dist_buf), "%.0f m", nav->distance);
+    else if (nav->distance >= 100)
+        snprintf(dist_buf, sizeof(dist_buf), "%.0f m", floor(nav->distance / 10.0) * 10.0);
     else
-        snprintf(dist_buf, sizeof(dist_buf), "-- m");
+        snprintf(dist_buf, sizeof(dist_buf), "%.0f m", nav->distance);
     label_set_if_changed(g_nav_dist_label, dist_buf);
 
-    label_set_if_changed(g_nav_street_label, nav->street_name);
+    /* Ligne du bas : nom de rue si fourni, sinon l'heure d'arrivee */
+    label_set_text_ascii(g_nav_street_label, nav->street_name[0] ? nav->street_name : nav->eta);
 }
 
 static void update_music_display(const music_info_t *m, unsigned int cover_version)
 {
     static unsigned int shown_cover = (unsigned int)-1;
 
-    if (m->title[0])  label_set_if_changed(g_music_label, m->title);
-    if (m->artist[0]) label_set_if_changed(g_music_artist_label, m->artist);
+    if (m->title[0])  label_set_text_ascii(g_music_label, m->title);
+    if (m->artist[0]) label_set_text_ascii(g_music_artist_label, m->artist);
 
     /* Recharge la jaquette uniquement si elle a change (avant : toutes les 100 ms) */
     if (cover_version != shown_cover) {

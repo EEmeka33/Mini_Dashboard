@@ -180,6 +180,16 @@ EOF
 echo -e "${GREEN}✓ Startup script created${NC}"
 echo ""
 
+# Step 7b: Remove the Pi OS taskbar Bluetooth widget (its "Pairing successful"
+# window pops over the dashboard and leaves fullscreen). Bluetooth keeps working.
+echo -e "${BLUE}Step 7b: Disabling taskbar Bluetooth popups...${NC}"
+if [ "$EUID" -eq 0 ] && [ -n "${SUDO_USER:-}" ]; then
+    sudo -u "$SUDO_USER" bash "$(dirname "$0")/disable_panel_bluetooth.sh" || true
+else
+    bash "$(dirname "$0")/disable_panel_bluetooth.sh" || true
+fi
+echo ""
+
 # Step 8: Summary
 echo "=========================================="
 echo -e "${GREEN}Setup Complete!${NC}"
