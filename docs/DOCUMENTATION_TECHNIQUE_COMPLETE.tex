@@ -10,6 +10,7 @@
 \usepackage{xcolor}
 \usepackage{booktabs}
 \usepackage{array}
+\usepackage{amssymb}   % \checkmark
 
 \lstdefinestyle{ccode}{language=C,basicstyle=\ttfamily\small,keywordstyle=\color{blue},
   commentstyle=\color{gray},stringstyle=\color{orange},breaklines=true,frame=single,
@@ -23,7 +24,7 @@
   backgroundcolor=\color{gray!10},columns=fullflexible}
 
 \title{\textbf{Documentation technique --- Mini Dashboard}\\
-\large Tableau de bord LVGL sur Raspberry Pi~5 (VERSION COMPLeTE)\\
+\large Tableau de bord LVGL sur Raspberry Pi~5 --- Version~4\\
 \normalsize \texttt{lv\_port\_vscode/src} \quad | \quad \texttt{NavRelay} \quad | \quad \texttt{SETUP.sh}}
 \author{meka3}
 \date{\today}
@@ -44,26 +45,32 @@ Pour une nouvelle installation de Raspberry Pi OS Bookworm, executer :
 \begin{enumerate}
   \item \textbf{Cloner le depôt et les sous-modules}
   \begin{lstlisting}[style=bashcode]
-git clone --recursive --branch master https://github.com/EEmeka33/Mini_Dashboard.git
+git clone --recursive \
+    https://github.com/EEmeka33/Mini_Dashboard.git
 cd Mini_Dashboard
   \end{lstlisting}
   \emph{Note:} L'option \texttt{--recursive} remplace les deux commandes separees
   \texttt{git submodule update --init --recursive}, simplifiant le processus.
-  
+
   \item \textbf{Installation et configuration automatisée (SETUP.sh)}
   \begin{lstlisting}[style=bashcode]
 bash SETUP.sh
   \end{lstlisting}
   Duree: ~5-10 minutes. Installe paquets, configure services systemd et le daemon RFCOMM.
-  
+
   Le script installe et active automatiquement :
 \begin{itemize}
-    \item \texttt{bluetooth.service} pour BlueZ
+    \item \texttt{bluetooth.service} pour BlueZ (avec un \texttt{main.conf} valide pour BlueZ~5)
     \item \texttt{ofono.service} pour les appels HFP
-    \item \texttt{nav-bind.service} pour le daemon RFCOMM (nouvelle feature)
+    \item \texttt{nav-bind.service} pour le daemon RFCOMM
     \item \texttt{pulseaudio} pour la musique Bluetooth
+    \item l'ajout de \texttt{pi5} aux groupes \texttt{bluetooth} et \texttt{dialout}
+    \item le retrait du widget Bluetooth de la barre des taches (voir section~\ref{sec:popup})
 \end{itemize}
-  
+
+  \textbf{Important :} se deconnecter puis se reconnecter (ou redemarrer) une fois apres
+  \texttt{SETUP.sh}, pour que les nouveaux groupes soient pris en compte.
+
   \item \textbf{Compiler le dashboard}
   \begin{lstlisting}[style=bashcode]
 cd lv_port_pc_vscode
@@ -73,7 +80,7 @@ cd build
 cmake ..
 make -j4
   \end{lstlisting}
-  
+
   \item \textbf{Vérifier que les services système tournent}
   \begin{lstlisting}[style=bashcode]
 sudo systemctl status bluetooth.service
@@ -87,8 +94,56 @@ sudo systemctl status nav-bind.service
 cd lv_port_pc_vscode/bin/
 ./main
   \end{lstlisting}
-  
+
+  \item \textbf{Quitter le dashboard} : touche \textbf{Échap} (ou \textbf{Ctrl+Q}) dans
+  l'application, \textbf{Ctrl+C} dans le terminal, ou \texttt{systemctl -{}-user stop dashboard}.
+  Le processus se termine proprement et rend l'ecran au bureau.
+
 \end{enumerate}
+
+%% ===========================================================================
+\section{Nouveautés de la version 4}
+%% ===========================================================================
+
+\begin{center}
+\begin{tabular}{>{\raggedright\arraybackslash}p{4.6cm}>{\raggedright\arraybackslash}p{9.6cm}}
+\toprule
+\textbf{Problème (v3)} & \textbf{Correction (v4)} \\
+\midrule
+Le programme ne se fermait pas (Ctrl+C, fermeture fenetre) &
+SDL interceptait Ctrl+C et le pilote LVGL patche n'appelait plus \texttt{exit()}.
+\texttt{main.c} gere desormais SIGINT/SIGTERM, \texttt{SDL\_QUIT} et Échap, puis
+arrete les threads proprement (section~\ref{sec:arret}). \\
+\addlinespace
+Il fallait relancer le dashboard apres le premier appairage &
+Le lecteur \texttt{MediaPlayer1} et le modem oFono n'etaient cherches qu'une fois.
+Ils sont maintenant recherches toutes les 3~s et apres chaque perte. \\
+\addlinespace
+L'UI pouvait geler plusieurs secondes &
+Plus aucun appel D-Bus ou reseau sous le verrou partage ni dans le thread UI ;
+connexion D-Bus privee par thread, timeout 3~s ; jaquette telechargee dans un thread dedie. \\
+\addlinespace
+Popup d'appairage du bureau Pi OS (sortie du plein ecran) &
+Agent BlueZ integre \texttt{bt\_agent.c} (agent par defaut, acceptation automatique
+pendant la fenetre Pair) et retrait du widget Bluetooth de la barre des taches. \\
+\addlinespace
+Distance toujours \og 0~m\fg{} &
+NavRelay lisait le titre Maps avec \texttt{getString()} (renvoie \texttt{null} pour un
+texte formate) et ne reconnaissait pas l'espace insecable de \og 300~m\fg{}. \\
+\addlinespace
+L'heure d'arrivee affichee comme action &
+Les lignes d'ETA sont reconnues et separees ; l'ETA s'affiche sous l'instruction. \\
+\addlinespace
+La navigation s'arretait apres une reconnexion du Pi &
+\texttt{NavServer} s'arretait definitivement a la premiere erreur d'ecriture ;
+il continue maintenant d'accepter les connexions. \\
+\addlinespace
+Accents absents a l'ecran &
+Les polices Montserrat de LVGL sont ASCII : les accents sont convertis
+(\og à\fg{} $\to$ \og a\fg{}) avant affichage. \\
+\bottomrule
+\end{tabular}
+\end{center}
 
 
 \newpage
@@ -205,7 +260,7 @@ lv_port_vscode/
     speedo_interactive.c    # Widget compteur de vitesse
     speedo_interactive.h    # API publique du compteur
     album_art.c             # Recuperation jaquette iTunes
-    bt_pairing.h            # Appels Pair button
+    bt_agent.c / bt_agent.h # Agent d'appairage BlueZ (bouton Pair)
   lvgl/                     # Sources LVGL (sous-module)
   lv_conf.h                 # Configuration LVGL
   CMakeLists.txt
@@ -271,9 +326,9 @@ L'exécutable sera créé à \texttt{bin/main}.
 \begin{lstlisting}[style=bashcode]
 cd lv_port_vscode
 gcc -O2 -o dashboard \
-  src/main.c src/speedo_interactive.c src/album_art.c \
+  src/main.c src/speedo_interactive.c src/album_art.c src/bt_agent.c \
+  src/mouse_cursor_icon.c src/hal/hal.c \
   $(find lvgl/src -name "*.c" | tr '\n' ' ') \
-  hal/hal.c \
   $(pkg-config --cflags --libs dbus-1 libcurl json-c sdl2) \
   -I. -Ilvgl -Ilvgl/src \
   -lm -lpthread
@@ -292,70 +347,153 @@ cd lv_port_vscode/bin
 Pour un lancement automatique au demarrage, un service systemd peut être configure
 via SETUP.sh.
 
-%% ===========================================================================
-\section{Pair Button et decouverte Bluetooth}
-%% ===========================================================================
+\subsection{Arrêt propre du dashboard}
+\label{sec:arret}
 
-\subsection{Nouvelle approche simplifiee}
+En v3, le pilote SDL de LVGL avait ete modifie pour ne plus appeler \texttt{exit()} sur
+\texttt{SDL\_QUIT}, mais \texttt{main()} tournait en \texttt{while(1)} sans jamais le
+detecter. De plus, SDL installe ses propres gestionnaires de signaux et transforme
+Ctrl+C en evenement \texttt{SDL\_QUIT}. Resultat : le processus ne s'arretait jamais.
 
-Au lieu de tenter un appairage automatise par script (qui conflitue avec l'interface
-Bluetooth du Pi OS), le \textbf{Pair Button} utilise une approche deux-etapes :
-
+La v4 procede ainsi :
 \begin{enumerate}
-  \item \textbf{Utilisateur clique sur le boutton "Pair"} dans le dashboard (UI LVGL).
-  \item \textbf{Pi devient decouvrable} pendant 3 minutes via le script \texttt{bt\_make\_discoverable.sh}.
-  \item \textbf{Utilisateur appaire depuis Bluetooth Settings du Pi} ou du telephone.
+  \item \texttt{SDL\_SetHint(SDL\_HINT\_NO\_SIGNAL\_HANDLERS, "1")} avant l'initialisation
+    de SDL, puis gestionnaires \texttt{sigaction} pour SIGINT, SIGTERM et SIGHUP qui
+    positionnent le drapeau \texttt{g\_quit}.
+  \item Un filtre d'evenements SDL (\texttt{SDL\_SetEventFilter}) intercepte
+    \texttt{SDL\_QUIT}, la fermeture de fenetre, Échap et Ctrl+Q. Ces evenements sont
+    supprimes pour que LVGL ne detruise pas l'affichage pendant qu'un timer l'utilise.
+  \item La boucle principale tourne tant que \texttt{app\_running()} est vrai.
+  \item À la sortie : arret de l'agent Bluetooth (desenregistrement, Pi rendu invisible),
+    reveil des threads par \texttt{SIGUSR1} (interrompt un \texttt{open()} ou \texttt{poll()}
+    bloquant), \texttt{pthread\_timedjoin\_np()} avec 3~s maximum par thread, puis
+    \texttt{lv\_sdl\_quit()}.
+  \item Filet de securite : \texttt{alarm(6)} termine le processus si une etape bloque.
 \end{enumerate}
 
-Cela elimine entierement le conflit logiciel car une seule application (l'interface
-native du Pi) envoie les commandes Bluetooth.
+%% ===========================================================================
+\section{Pair Button et agent d'appairage Bluetooth}
+%% ===========================================================================
 
-\subsection{Rôle de \texttt{bt\_pairing.h}}
+\subsection{Principe : un agent BlueZ integre au dashboard}
 
-\begin{lstlisting}[style=ccode,caption={bt\_pairing.h --- fonction publique}]
-static inline int bluetooth_pair_device_start(void)
-{
-    /* Lance bt_make_discoverable.sh en processus fils detache */
-    pid_t pid = fork();
-    if (pid == 0) {
-        setsid();  /* Detache de la session parente */
-        execv("/bin/bash", ...);    
-        exit(0);
-    }
-    return (pid > 0) ? 0 : -1;
-}
+Quand un telephone demande a s'appairer, BlueZ interroge l'\emph{agent par defaut}
+(\texttt{org.bluez.Agent1}) pour obtenir une confirmation. En v3, cet agent etait celui
+du bureau Pi OS, qui affichait une fenetre de confirmation et faisait sortir le dashboard
+du plein ecran.
+
+En v4, le dashboard enregistre son propre agent (\texttt{src/bt\_agent.c}) et le declare
+agent par defaut via \texttt{AgentManager1.RequestDefaultAgent}. BlueZ lui envoie donc
+toutes les demandes, auxquelles il repond sans aucune fenetre. L'agent reaffirme sa place
+toutes les 15~s, au cas ou le bureau la reprendrait, et se desenregistre a la fermeture.
+
+\begin{lstlisting}[style=ccode,caption={bt\_agent.h --- API publique (non bloquante)}]
+#define BT_PAIR_WINDOW_S 180
+
+int  bt_agent_start(void);               /* lance le thread agent      */
+void bt_agent_stop(void);                /* desenregistre et arrete    */
+void bt_agent_open_pairing_window(void); /* appele par le bouton Pair  */
+void bt_agent_get_status(char *buf, size_t len); /* texte sous Pair    */
 \end{lstlisting}
 
-La fonction retourne 0 en cas de succes, -1 en cas d'erreur. Le callback bouton
-affiche \texttt{"Made Discoverable"} ou \texttt{"Error"}.
+Tout le travail D-Bus est fait dans un thread dedie ; l'UI ne fait que poser une demande.
+Ce module remplace \texttt{bt\_pairing.h} et l'appel a \texttt{bt\_make\_discoverable.sh}.
 
-\subsection{Script \texttt{bt\_make\_discoverable.sh}}
+\subsection{Fenetre d'appairage (bouton Pair)}
 
-\begin{lstlisting}[style=bashcode,caption={bt\_make\_discoverable.sh}]
-#!/bin/bash
-bluetoothctl discoverable on
-sleep 180         # 3 minutes
-bluetoothctl discoverable off
+Un appui sur \textbf{Pair} :
+\begin{enumerate}
+  \item met l'adaptateur sous tension (\texttt{Powered}) ;
+  \item regle \texttt{DiscoverableTimeout} et \texttt{PairableTimeout} a 180~s ;
+  \item active \texttt{Pairable} et \texttt{Discoverable} sur \texttt{org.bluez.Adapter1} ;
+  \item affiche le compte a rebours sous le bouton (\og Visible 2:59 - pair from your phone\fg{}).
+\end{enumerate}
+
+Pendant la fenetre, l'agent verifie chaque seconde les appareils BlueZ. Des qu'un
+telephone devient \texttt{Paired}, il est marque \texttt{Trusted} (reconnexions futures
+sans autorisation), une connexion est lancee (\texttt{Device1.Connect}), la fenetre se
+ferme et le dashboard affiche \og Paired: <nom>\fg{}.
+
+\subsection{Regles d'acceptation}
+
+\begin{center}
+\begin{tabular}{lll}
+\toprule
+\textbf{Requete BlueZ} & \textbf{Fenetre ouverte} & \textbf{Fenetre fermee} \\
+\midrule
+\texttt{RequestConfirmation} & acceptee & refusee \\
+\texttt{RequestAuthorization} & acceptee & refusee \\
+\texttt{RequestPinCode} & \texttt{"0000"} & refusee \\
+\texttt{RequestPasskey} & \texttt{0} & refusee \\
+\texttt{AuthorizeService} & acceptee & acceptee si deja appaire \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\textbf{Securite :} hors de la fenetre de 3~minutes, aucun nouvel appareil ne peut
+s'appairer. Seuls les telephones deja appaires peuvent se reconnecter.
+
+\subsection{Parametres (\texttt{bt\_agent.c})}
+
+\begin{lstlisting}[style=ccode,caption={bt\_agent.c --- configuration}]
+#define AGENT_PATH        "/org/minidashboard/agent"
+#define AGENT_CAPABILITY  "NoInputNoOutput"
+#define BT_ALIAS          NULL     /* ex: "Mini Dashboard" */
+#define DBUS_TIMEOUT_MS   3000
 \end{lstlisting}
 
-Ce script s'execute en arriere-plan, sans bloquer l'UI du dashboard.
+\begin{description}
+  \item[\texttt{NoInputNoOutput}] Appairage \emph{Just Works} : le telephone demande
+    seulement \og Associer ?\fg{}.
+  \item[\texttt{DisplayYesNo}] Comparaison de code : le code s'affiche sur le telephone,
+    le Pi le confirme automatiquement.
+  \item[\texttt{BT\_ALIAS}] Nom visible depuis le telephone ; \texttt{NULL} conserve le nom
+    du Pi (\og raspberrypi\fg{}).
+\end{description}
+
+\subsection{Popup \og Pairing successful\fg{} du bureau Pi OS}
+\label{sec:popup}
+
+Meme avec l'agent integre, le \textbf{widget Bluetooth de la barre des taches} affichait
+encore une fenetre \og Pairing successful / Connection successful\fg{}. Ce widget
+(\texttt{lxplug-bluetooth}) surveille tous les appareils BlueZ et ouvre sa propre fenetre
+GTK des qu'un appareil passe a \texttt{Paired}, quel que soit l'agent qui a accepte.
+Le dashboard ne peut donc pas l'empecher : il faut retirer le widget.
+
+Le script \texttt{disable\_panel\_bluetooth.sh}, appele par \texttt{SETUP.sh}, le retire
+pour les deux bureaux de Pi OS :
+\begin{itemize}
+  \item \textbf{Wayland} (\texttt{wf-panel-pi}) : supprime \texttt{bluetooth} de la cle
+    \texttt{widgets\_right} dans le fichier\\
+    \path{~/.config/wf-panel-pi/wf-panel-pi.ini} ;
+  \item \textbf{X11} (\texttt{lxpanel-pi}) : supprime le bloc \texttt{Plugin \{ type=bluetooth \}}
+    du fichier\\
+    \path{~/.config/lxpanel-pi/panels/panel}.
+\end{itemize}
+
+\begin{lstlisting}[style=bashcode]
+bash disable_panel_bluetooth.sh            # retire le widget (sans sudo, en pi5)
+bash disable_panel_bluetooth.sh --restore  # remet la configuration d'origine
+\end{lstlisting}
+
+Le Bluetooth continue de fonctionner (\texttt{bluetoothd} est un service systeme) ;
+seule l'icone de la barre des taches disparait.
 
 \subsection{Appairage initial du telephone}
 
-\subsubsection{Methode 1 : Via le boutton Pair du dashboard (RECOMMANDÉE)}
+\subsubsection{Methode 1 : Via le bouton Pair du dashboard (RECOMMANDÉE)}
 
 \begin{enumerate}
-  \item \textbf{Lancer le dashboard} : \texttt{./bin/main} depuis \texttt{lv\_port\_pc\_vscode/build}
-  \item \textbf{Cliquer sur le boutton bleu \og Pair\fg{}} dans l'UI LVGL
-  \item \textbf{Le Pi devient decouvrable pendant 3 minutes}
-  \item \textbf{Sur le telephone} : ouvrir Parametres $\to$ Bluetooth $\to$ Chercher des appareils
-  \item \textbf{Selectionner \og raspberrypi\fg{}} et appuyer sur Appairer
-  \item \textbf{Confirmer le PIN} sur le telephone si demande
-  \item \textbf{Dashboard affiche \og Made Discoverable\fg{}} si succes
+  \item \textbf{Lancer le dashboard} : \texttt{./main} depuis \texttt{lv\_port\_pc\_vscode/bin}
+  \item \textbf{Cliquer sur le bouton bleu \og Pair\fg{}} : le Pi devient visible 3~minutes
+  \item \textbf{Sur le telephone} : Parametres $\to$ Bluetooth $\to$ Associer un appareil
+  \item \textbf{Selectionner \og raspberrypi\fg{}} et accepter \textbf{sur le telephone uniquement}
+  \item Le dashboard affiche \og Paired: <nom du telephone>\fg{} ; aucune fenetre ne s'ouvre sur le Pi
 \end{enumerate}
 
-\emph{Avantage:} Aucune ligne de commande, interface graphique integree au dashboard.
-Le MAC du telephone est automatiquement detecte par \texttt{main.c}.
+\emph{Avantage :} aucune ligne de commande, aucune confirmation sur le Pi, le plein ecran
+est conserve. Le telephone est automatiquement \texttt{Trusted} et son adresse MAC est
+detectee par \texttt{main.c}.
 
 \subsubsection{Methode 2 : En ligne de commande (manuel)}
 
@@ -388,9 +526,9 @@ Confirmer le PIN sur le telephone (ou pas si le Pi envoie le PIN automatiquement
 [bluetooth]# quit
 \end{lstlisting}
 
-\emph{Note:} Apres appairage, l'adresse MAC est automatiquement sauvegardee par
-\texttt{main.c} dans \texttt{/tmp/connected\_phone\_mac.txt} lors de la detection
-du telephone. Aucune modification manuelle du daemon n'est necessaire.
+\emph{Note :} \texttt{bluetoothctl default-agent} prend la place de l'agent du dashboard
+jusqu'a la prochaine reaffirmation (15~s maximum). Apres appairage, l'adresse MAC est
+sauvegardee par \texttt{main.c} dans \texttt{/tmp/connected\_phone\_mac.txt}.
 
 %% ===========================================================================
 \section{Configuration systeme Bluetooth}
@@ -398,29 +536,43 @@ du telephone. Aucune modification manuelle du daemon n'est necessaire.
 
 \subsection{Configuration BlueZ pour la musique et les appels}
 
-\subsubsection{Desactivation du profil Headset natif de BlueZ}
+\subsubsection{Fichier \texttt{main.conf} ecrit par \texttt{SETUP.sh}}
 
-Par defaut, BlueZ enregistre les UUID HFP/HSP pour son propre profil \emph{Headset},
-ce qui entre en conflit avec oFono. L'erreur suivante apparaît alors :
+La version precedente de \texttt{SETUP.sh} ecrivait des cles que BlueZ~5 ne connait pas
+(\texttt{Enable=Source}, \texttt{HandsfreeDevice}, \texttt{Trustable}) et qui etaient
+ignorees. La v4 ecrit uniquement des cles valides (l'ancien fichier est sauvegarde une
+seule fois dans \texttt{main.conf.orig}) :
 
-\begin{verbatim}
-RegisterProfile() replied: org.bluez.Error.NotPermitted
-UUID already registered
-\end{verbatim}
+\begin{lstlisting}[style=confcode,caption={/etc/bluetooth/main.conf (v4)}]
+[General]
+# Classe "Car audio" : le telephone voit le Pi comme un autoradio
+Class = 0x200420
+# Fenetre d'appairage ouverte par le bouton Pair (secondes)
+DiscoverableTimeout = 180
+PairableTimeout = 0
+# Re-appairage sans confirmation si le telephone a "oublie" le Pi
+JustWorksRepairing = always
+FastConnectable = true
 
-Pour ceder la gestion HFP à oFono, editer \texttt{/etc/bluetooth/main.conf} :
+[Policy]
+# Adaptateur allume au demarrage + reconnexion auto au telephone connu
+AutoEnable = true
+ReconnectAttempts = 7
+ReconnectIntervals = 1,2,4,8,16,32,64
+\end{lstlisting}
+
+\textbf{Note sur \texttt{Disable=Headset} :} cette directive vient de BlueZ~4
+(\texttt{audio.conf}) et n'est pas reconnue par BlueZ~5. Sous Bookworm, c'est la
+configuration PipeWire de la section~\ref{sec:pipewire} qui confie le HFP a oFono.
+
+\subsubsection{Groupes de l'utilisateur}
+
+L'agent d'appairage et la lecture de \texttt{/dev/rfcomm1} necessitent :
 
 \begin{lstlisting}[style=bashcode]
-sudo nano /etc/bluetooth/main.conf
+sudo usermod -aG bluetooth,dialout pi5   # fait par SETUP.sh
+# puis se deconnecter / se reconnecter
 \end{lstlisting}
-
-\begin{lstlisting}[style=confcode,caption={/etc/bluetooth/main.conf}]
-[General]
-Disable=Headset
-\end{lstlisting}
-
-Cette directive ne desactive ni A2DP ni AVRCP ; seul le profil casque/mains libres
-natif BlueZ est desactive. Le lecteur de musique continue de fonctionner normalement.
 
 \subsubsection{Activation du service oFono}
 
@@ -440,6 +592,7 @@ sudo systemctl restart ofono
 \end{lstlisting}
 
 \subsection{Configuration PipeWire pour HFP via oFono}
+\label{sec:pipewire}
 
 Sur Raspberry Pi OS Bookworm, PipeWire remplace PulseAudio. Pour que les appels HFP
 passent par oFono :
@@ -515,7 +668,9 @@ automatiquement lors du reconnexion d'un telephone different.
 \textbf{Comment ca marche:}
 \begin{enumerate}
   \item \texttt{main.c} detecte le telephone connecte via D-Bus (org.bluez.Device1).
-  \item \texttt{main.c} extrait l'adresse MAC et l'ecrit dans \texttt{/tmp/connected\_phone\_mac.txt}.
+  \item \texttt{main.c} extrait l'adresse MAC et l'ecrit dans \texttt{/tmp/connected\_phone\_mac.txt}
+    (verification toutes les 5~s ; ecriture uniquement si l'adresse change, via un fichier
+    temporaire puis \texttt{rename()} pour que le daemon ne lise jamais un fichier incomplet).
   \item Le daemon relance la lecture du fichier chaque cycle (5 secondes).
   \item Si le MAC change (nouveau telephone), le daemon se reconfigure automatiquement.
 \end{enumerate}
@@ -704,22 +859,48 @@ manuellement apres le premier lancement :
 \end{enumerate}
 
 \texttt{MainActivity} ouvre automatiquement cet ecran via
-\texttt{Settings.ACTION\_NOTIFICATION\_LISTENER\_SETTINGS}.
+\texttt{Settings.ACTION\_NOTIFICATION\_LISTENER\_SETTINGS} si l'acces n'est pas encore accorde.
+
+\textbf{Apres chaque reinstallation} (\emph{Run} depuis Android Studio), l'application est
+tuee : rouvrir NavRelay et appuyer a nouveau sur \textbf{Start}. Android ne relie parfois pas
+le service de notifications apres une mise a jour ; l'ecran d'etat l'indique
+(\og NOT bound\fg{}) et il suffit alors de desactiver puis reactiver NavRelay dans
+\emph{Acces aux notifications}.
 
 \textbf{Note :} Sur certaines ROM Android, desactiver l'optimisation de batterie
 pour NavRelay afin d'eviter que le service soit tue en arriere-plan.
 
-\subsection{\texttt{MainActivity} : demarrage du serveur}
+\subsection{\texttt{MainActivity} : demarrage et ecran d'etat}
 
 \begin{lstlisting}[style=ktcode,caption={MainActivity.kt --- bouton Start}]
 startButton.setOnClickListener {
     NavServer.start(this)
-    statusText.text = "NavServer demarre.\n" +
-        "Active le service de notifications pour NavRelay."
-    startActivity(
-        Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+    if (hasNotificationAccess()) {
+        // Apres une reinstallation, Android ne relie souvent pas
+        // le service de notifications : on le force.
+        NotificationListenerService.requestRebind(
+            ComponentName(this, MapsNotificationListener::class.java))
+    } else {
+        startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+    }
 }
 \end{lstlisting}
+
+L'ecran est rafraichi toutes les secondes et indique l'etat de chaque maillon :
+
+\begin{center}
+\begin{tabular}{>{\raggedright\arraybackslash}p{4.2cm}>{\raggedright\arraybackslash}p{10cm}}
+\toprule
+\textbf{Ligne} & \textbf{Signification} \\
+\midrule
+1. Notification access & \texttt{OK} ou \texttt{MISSING} (permission non accordee) \\
+2. Maps listener & \texttt{bound} ou \texttt{NOT bound} (desactiver/reactiver l'acces) \\
+3. Bluetooth server & \texttt{Waiting for the Pi...}, \texttt{Connected to ...}, \texttt{Bluetooth is OFF} \\
+4. Messages sent to Pi & compteur des lignes JSON envoyees \\
+Last Maps info & derniere action, distance et ETA reconnues \\
+\bottomrule
+\end{tabular}
+\end{center}
 
 Les permissions Bluetooth et localisation sont demandees au lancement via
 \texttt{ActivityCompat.requestPermissions()}, avec les variantes
@@ -744,33 +925,40 @@ registre SDP. Ces deux valeurs doivent rester coherentes.
 \texttt{start()} lance un thread qui :
 
 \begin{enumerate}
-  \item Recupere l'adaptateur Bluetooth et verifie qu'il est actif.
+  \item Recupere l'adaptateur Bluetooth ; s'il est eteint, l'etat affiche
+    \og Bluetooth is OFF\fg{} et le thread reessaie toutes les 2~s.
   \item Appelle \texttt{listenUsingRfcommWithServiceRecord(SERVICE\_NAME, SPP\_UUID)},
     enregistrant le service dans le registre SDP avec un canal assigne dynamiquement.
     C'est ce canal que le daemon decouvre via \texttt{sdptool}.
   \item Boucle sur \texttt{accept()} pour accepter la connexion du Raspberry Pi.
     À chaque reconnexion, l'ancienne socket et son flux sont fermes et remplaces.
+  \item En cas d'erreur du serveur, il est recree automatiquement apres 2~s.
 \end{enumerate}
 
 \subsubsection{Envoi des messages JSON}
 
 \begin{lstlisting}[style=ktcode,caption={NavServer.kt --- send()}]
 fun send(json: JSONObject) {
-    val out = outRef.get() ?: return
+    val out = outRef.get() ?: return      // Pi pas encore connecte
     try {
         val line = json.toString() + "\n"
         out.write(line.toByteArray(Charsets.UTF_8))
         out.flush()
+        sentCount++
     } catch (e: Exception) {
-        e.printStackTrace()
-        stop()
+        // Le Pi s'est deconnecte : on ferme SEULEMENT ce client,
+        // le serveur continue d'accepter les connexions.
+        dropClient()
+        if (running) state = "Waiting for the Pi..."
     }
 }
 \end{lstlisting}
 
-Chaque message est une ligne JSON terminee par \verb|\n| en UTF-8. En cas d'exception
-d'ecriture (deconnexion Bluetooth), le serveur s'arrête proprement et attend une
-nouvelle connexion.
+Chaque message est une ligne JSON terminee par \verb|\n| en UTF-8.
+
+\textbf{Correction v4 :} en v3, une erreur d'ecriture appelait \texttt{stop()}, ce qui
+arretait definitivement le serveur. Chaque redemarrage du dashboard (qui ferme
+\texttt{/dev/rfcomm1}) coupait donc la navigation jusqu'a un nouvel appui sur Start.
 
 \subsubsection{Format JSON}
 
@@ -779,33 +967,104 @@ nouvelle connexion.
   "timestamp": 1711550400,
   "next_action": "Tournez a droite sur Rue de la Paix",
   "distance_to_next_m": 320,
+  "eta": "12 min - 4,5 km - Arrivee a 14:32",
   "speed_kmh": 48.5,
   "lat": 48.8566,
   "lon": 2.3522
 }
 \end{lstlisting}
 
+\begin{description}
+  \item[\texttt{distance\_to\_next\_m}] distance avant la prochaine manoeuvre, en metres ;
+    \texttt{-1} si elle est inconnue (le dashboard affiche alors \og -{}- m\fg{}).
+  \item[\texttt{eta}] ligne d'arrivee de Maps (nouveau en v4), affichee sous l'instruction.
+\end{description}
+
 \subsection{\texttt{MapsNotificationListener}}
 
 \subsubsection{Interception des notifications}
 
 \texttt{onNotificationPosted()} filtre les notifications dont le \texttt{packageName}
-est \texttt{"com.google.android.apps.maps"} et extrait :
+est \texttt{"com.google.android.apps.maps"}. Une notification de navigation typique (FR) :
 
-\begin{itemize}
-  \item \texttt{EXTRA\_TITLE} : distance jusqu'à la prochaine manœuvre (ex : \og 320~m \fg{}).
-  \item \texttt{EXTRA\_TEXT} : instruction textuelle (ex : \og Tournez à droite \fg{}).
-  \item \texttt{EXTRA\_SUB\_TEXT} : information complementaire.
-\end{itemize}
+\begin{center}
+\begin{tabular}{lll}
+\toprule
+\textbf{Champ} & \textbf{Exemple} & \textbf{Role} \\
+\midrule
+\texttt{EXTRA\_TITLE} & \og 300~m\fg{} & distance avant la manoeuvre \\
+\texttt{EXTRA\_TEXT} & \og Tournez à droite sur Rue X\fg{} & prochaine action \\
+\texttt{EXTRA\_SUB\_TEXT} & \og 12~min · 4,5~km · Arrivée à 14:32\fg{} & ETA \\
+\bottomrule
+\end{tabular}
+\end{center}
 
-Le champ \texttt{next\_action} est determine par ordre de priorite :
-\texttt{EXTRA\_TEXT} $>$ \texttt{EXTRA\_SUB\_TEXT} $>$ \texttt{EXTRA\_TITLE}.
+La disposition varie selon la version de Maps (la distance peut etre dans la meme ligne
+que l'action : \og 300~m · Tournez à droite\fg{}). Le listener ne se fie donc pas a la
+position des champs mais \textbf{classe le contenu}.
+
+\subsubsection{Lecture des textes : \texttt{getCharSequence()}}
+
+Maps place du texte formate (\texttt{SpannableString}) dans le titre. En v3, le titre etait
+lu avec \texttt{getString()}, qui renvoie \texttt{null} dans ce cas : la distance etait
+perdue (d'ou \og 0~m\fg{}) et la ligne d'ETA etait prise comme action. La v4 lit tous les
+champs avec \texttt{getCharSequence()} :
+
+\begin{lstlisting}[style=ktcode]
+private fun Bundle.text(key: String): String =
+    getCharSequence(key)?.toString()?.trim().orEmpty()
+\end{lstlisting}
+
+Champs lus, par ordre de priorite : \texttt{EXTRA\_TITLE}, \texttt{EXTRA\_TITLE\_BIG},
+\texttt{EXTRA\_TEXT}, \texttt{EXTRA\_BIG\_TEXT}, \texttt{EXTRA\_TEXT\_LINES},
+\texttt{EXTRA\_SUB\_TEXT}, \texttt{EXTRA\_INFO\_TEXT}.
+
+\subsubsection{Classement : ETA, distance, action}
+
+\begin{enumerate}
+  \item \textbf{ETA} : une ligne est classee ETA si elle contient une heure
+    (\texttt{14:32}, \texttt{14 h 32}), une duree (\texttt{12 min}, \texttt{1 h}) ou le mot
+    \og arrivée\fg{} / \og ETA\fg{}. Elle n'est jamais utilisee comme action ni comme
+    distance (sinon la distance totale \og 4,5~km\fg{} remplacerait celle de la manoeuvre).
+  \item \textbf{Distance} : premiere distance trouvee dans les lignes non-ETA.
+  \item \textbf{Action} : premiere ligne non-ETA qui contient autre chose qu'une distance ;
+    une distance en tete (\og 300~m · \fg{}) est retiree.
+  \item \textbf{Filet de securite} : si rien n'est reconnu, la premiere ligne est envoyee
+    telle quelle (comportement v3) plutot que de ne rien envoyer.
+\end{enumerate}
+
+\begin{lstlisting}[style=ktcode,caption={MapsNotificationListener.kt --- expressions regulieres}]
+// Espaces normales + insecables (Maps FR : U+00A0 / U+202F)
+private const val SP = """[\s\u00A0\u202F]"""
+
+// (?!\p{L}) : "12 min" n'est pas pris pour "12 m"
+private val DIST_RE = Regex(
+    """(?<![\d.,])(\d+(?:[.,]\d+)?)$SP*(km|m|mi|ft|yd)(?!\p{L})""",
+    RegexOption.IGNORE_CASE)
+
+private val ETA_RE = Regex(
+    """\b\d{1,2}$SP?[:h]$SP?\d{2}\b|\b\d+$SP*(min|h|hr|hrs)\b|arriv|\beta\b""",
+    RegexOption.IGNORE_CASE)
+\end{lstlisting}
 
 \subsubsection{Extraction de la distance}
 
-\texttt{parseDistanceMeters()} analyse la chaîne concatenee avec une expression
-reguliere reconnaissant les formats \og \texttt{320 m} \fg{} et \og \texttt{1.2 km} \fg{}.
-Les kilometres sont convertis en metres pour normaliser \texttt{distance\_to\_next\_m}.
+\texttt{parseDistanceMeters()} reconnait \og \texttt{320 m}\fg{}, \og \texttt{1,2 km}\fg{},
+\og \texttt{1.2 km}\fg{}, ainsi que \texttt{mi}, \texttt{ft} et \texttt{yd}. Tout est converti
+en metres ; la fonction renvoie \texttt{-1} si aucune distance n'est trouvee.
+
+\subsubsection{Liaison du service et debogage}
+
+\texttt{onListenerConnected()} / \texttt{onListenerDisconnected()} tiennent a jour l'etat
+\og bound\fg{} affiche dans \texttt{MainActivity} ; en cas de deconnexion, le service
+demande lui-meme a Android d'etre relie (\texttt{requestRebind}). Chaque notification Maps
+est journalisee :
+
+\begin{lstlisting}[style=bashcode]
+adb logcat -s NavRelay
+# title='300 m' text='Tournez a droite...' sub='12 min - ...'
+# -> next='Tournez a droite...' dist=300 eta='12 min - ...'
+\end{lstlisting}
 
 \subsubsection{Donnees GPS}
 
@@ -852,13 +1111,14 @@ Toutes les donnees partagees entre les threads et le timer UI sont stockees dans
 l'instance globale \texttt{g\_state} de type \texttt{app\_state\_t}, protegee par
 \texttt{g\_state.lock} (mutex POSIX).
 
-\begin{lstlisting}[style=ccode,caption={main.c --- structures de donnees}]
+\begin{lstlisting}[style=ccode,caption={main.c --- structures de donnees (v4)}]
 typedef struct {
-    char   instruction[256]; /* Instruction de virage courante */
-    double distance;         /* Distance en metres             */
+    char   instruction[256]; /* Instruction de virage courante   */
+    double distance;         /* Distance en metres (-1 = inconnue) */
     double next_distance;
-    char   street_name[256]; /* Nom de la rue courante         */
-    double speed;            /* Vitesse vehicule en km/h       */
+    char   street_name[256]; /* Nom de la rue courante           */
+    char   eta[128];         /* "12 min - 4,5 km - Arrivee 14:32" */
+    double speed;            /* Vitesse vehicule en km/h         */
     double lat;
     double lon;
 } nav_info_t;
@@ -870,7 +1130,6 @@ typedef struct {
     char         status[32];     /* "playing", "paused", etc.  */
     unsigned int position_ms;
     unsigned int duration_ms;
-    char         cover_path[512];
 } music_info_t;
 
 typedef struct {
@@ -880,52 +1139,80 @@ typedef struct {
     char call_path[256];  /* Chemin D-Bus de l'appel oFono     */
 } call_info_t;
 
+/* Commandes posees par l'UI, executees par les threads */
+typedef enum { MEDIA_NONE, MEDIA_PLAY, MEDIA_PAUSE, MEDIA_NEXT, MEDIA_PREV } media_cmd_t;
+typedef enum { CALL_NONE, CALL_ANSWER, CALL_HANGUP } call_cmd_t;
+
 typedef struct {
     nav_info_t      nav;
+    int             nav_connected;
     music_info_t    music;
+    unsigned int    cover_version;   /* +1 a chaque nouvelle jaquette */
     call_info_t     current_call;
     int             has_incoming_call;
+    media_cmd_t     media_cmd;
+    call_cmd_t      call_cmd;
+    char            call_cmd_path[256];
     pthread_mutex_t lock;
 } app_state_t;
 \end{lstlisting}
+
+\textbf{Regle de verrouillage (v4) :} le verrou \texttt{g\_state.lock} ne sert qu'a copier
+des donnees. Aucun appel D-Bus, reseau ou LVGL n'est fait en le tenant. En v3, le thread
+musique gardait le verrou pendant les appels D-Bus (timeout par defaut 25~s) et le
+telechargement iTunes, ce qui figeait le timer UI.
+
+\textbf{Connexions D-Bus :} chaque thread ouvre sa propre connexion privee
+(\texttt{dbus\_bus\_get\_private()}, \texttt{exit\_on\_disconnect} desactive) et tous les
+appels ont un timeout de 3~s (\texttt{DBUS\_TIMEOUT\_MS}). En v3, les deux threads
+ecrasaient la meme variable globale \texttt{dbus\_conn}.
 
 \subsection{Thread de navigation : \texttt{nav\_thread\_fn()}}
 
 \subsubsection{Connexion et reconnexion à \texttt{/dev/rfcomm1}}
 
-\begin{lstlisting}[style=ccode,caption={main.c --- boucle de reconnexion rfcomm1}]
-while (1) {
+\begin{lstlisting}[style=ccode,caption={main.c --- boucle de lecture rfcomm1 (v4)}]
+while (app_running()) {
     if (fd < 0) {
+        /* bloque jusqu'a la connexion ; SIGUSR1 l'interrompt a l'arret */
         fd = open("/dev/rfcomm1", O_RDONLY | O_NOCTTY);
-        if (fd < 0) { sleep(2); continue; }
-        f = fdopen(fd, "r");
-        if (!f) { close(fd); fd = -1; sleep(2); continue; }
+        if (fd < 0) { sleep_ms_interruptible(2000, NULL); continue; }
+        fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK);
     }
-    if (fgets(line, sizeof(line), f)) {
-        /* strip \r\n, parse JSON, mise a jour g_state.nav */
-    } else {
-        /* EOF ou erreur : fermeture et reconnexion */
-        fclose(f); f = NULL; fd = -1; sleep(2);
-    }
+    struct pollfd pfd = { .fd = fd, .events = POLLIN };
+    int pr = poll(&pfd, 1, 500);   /* reveil periodique pour l'arret */
+    if (pr == 0 || (pr < 0 && errno == EINTR)) continue;
+    ssize_t n = read(fd, buf + used, sizeof(buf) - 1 - used);
+    if (n <= 0) { /* EOF / HUP : fermeture et reconnexion */ }
+    /* decoupage par '\n' puis nav_handle_line() pour chaque ligne */
 }
 \end{lstlisting}
 
 Le port est ouvert avec \texttt{O\_NOCTTY} pour eviter d'en faire le terminal de
-contrôle du processus.
+contrôle du processus. Le \texttt{poll()} de 500~ms (au lieu de \texttt{fgets()} bloquant)
+permet au thread de s'arreter rapidement a la fermeture du dashboard.
+
+\texttt{nav\_handle\_line()} parse la ligne hors verrou dans une copie locale, puis la
+recopie dans \texttt{g\_state.nav}. Le terminal affiche une ligne a chaque changement :
+
+\begin{verbatim}
+Nav updated: 300 m | Tournez a droite sur Rue X | 12 min - 4,5 km - ...
+\end{verbatim}
 
 \subsubsection{Parsing JSON}
 
 \texttt{parse\_nav\_json()} utilise \texttt{json\_tokener\_parse()} de \texttt{json-c}.
-Elle extrait \texttt{next\_action}, \texttt{distance\_to\_next\_m}, \texttt{street\_name},
-\texttt{speed\_kmh}, \texttt{lat}, \texttt{lon} et remplit \texttt{nav\_info\_t}.
-Si \texttt{street\_name} est absent, l'UI affiche \og Unknown Street \fg{}.
+Elle extrait \texttt{next\_action}, \texttt{distance\_to\_next\_m}, \texttt{eta},
+\texttt{street\_name}, \texttt{speed\_kmh}, \texttt{lat}, \texttt{lon} et remplit
+\texttt{nav\_info\_t}. La ligne du bas affiche \texttt{street\_name} s'il est fourni,
+sinon l'ETA.
 
 \subsection{Thread musique : \texttt{music\_thread\_fn()}}
 
 \subsubsection{Connexion D-Bus et decouverte du lecteur}
 
-\texttt{dbus\_connect\_system()} initialise une connexion au bus D-Bus systeme via
-\texttt{dbus\_bus\_get(DBUS\_BUS\_SYSTEM, \&err)}.
+\texttt{dbus\_open\_private("music")} ouvre une connexion privee au bus systeme (nouvel
+essai toutes les 2~s si le bus est indisponible).
 
 \texttt{find\_player\_path()} envoie \texttt{GetManagedObjects} à \texttt{org.bluez}
 sur \texttt{/} et cherche le premier objet exposant \texttt{org.bluez.MediaPlayer1}.
@@ -935,9 +1222,15 @@ Le chemin resultant est de la forme :
 /org/bluez/hci0/dev_2C_BE_EB_7F_2D_FA/player0
 \end{verbatim}
 
+\textbf{Redecouverte automatique (v4) :} tant qu'aucun lecteur n'est connu, la recherche
+est relancee toutes les 3~s (\texttt{REDISCOVER\_PERIOD\_S}). Si \texttt{GetAll} echoue
+(telephone deconnecte, \texttt{player0} devenu \texttt{player1}...), le chemin est oublie
+et la recherche reprend ; l'UI affiche \og No MediaPlayer / Searching...\fg{}. Il n'est
+donc plus necessaire de relancer le dashboard apres le premier appairage.
+
 \subsubsection{Lecture des proprietes}
 
-Toutes les 2 secondes, \texttt{get\_music\_properties()} appelle
+Toutes les secondes, \texttt{get\_music\_properties()} appelle
 \texttt{GetAll("org.bluez.MediaPlayer1")} et extrait :
 
 \begin{itemize}
@@ -947,15 +1240,18 @@ Toutes les 2 secondes, \texttt{get\_music\_properties()} appelle
     \texttt{Duration}
 \end{itemize}
 
-En cas de changement de piste (couple titre+artiste), \texttt{download\_itunes\_cover()}
-est appelee pour recuperer la nouvelle jaquette.
+En cas de changement de piste (couple titre+artiste), une demande est transmise au
+\textbf{thread jaquette} (\texttt{cover\_thread\_fn()}, file d'une requete protegee par
+\texttt{g\_cover\_lock} et \texttt{g\_cover\_cond}). Le telechargement, qui peut prendre
+plusieurs secondes, ne bloque ainsi ni les boutons musique ni l'UI. Une fois la jaquette
+ecrite, \texttt{g\_state.cover\_version} est incremente.
 
 \subsubsection{Commandes de contrôle}
 
-\texttt{send\_player\_method(method)} envoie \texttt{Play}, \texttt{Pause},
-\texttt{Next} ou \texttt{Previous} à \texttt{org.bluez.MediaPlayer1} avec un
-timeout de 5000~ms. Ces appels sont declenches par les boutons LVGL sous le
-verrou \texttt{g\_state.lock}.
+Les boutons LVGL ne font plus d'appel D-Bus : ils posent une commande dans
+\texttt{g\_state.media\_cmd}. Le thread musique la lit a chaque tour (toutes les 200~ms)
+et appelle \texttt{send\_player\_method()}, qui envoie \texttt{Play}, \texttt{Pause},
+\texttt{Next} ou \texttt{Previous} à \texttt{org.bluez.MediaPlayer1} (timeout 3~s).
 
 \subsection{Thread appels : \texttt{calls\_thread\_fn()}}
 
@@ -969,9 +1265,14 @@ d'interfaces contient \texttt{"org.ofono.VoiceCallManager"} :
 /hfp/org/bluez/hci0/dev_2C_BE_EB_7F_2D_FA
 \end{verbatim}
 
+Comme pour la musique, la recherche est relancee toutes les 3~s tant qu'aucun modem
+n'est trouve, et apres tout echec de \texttt{GetCalls}. Si un modem HFP est present mais
+eteint (\texttt{Powered = false}), il est allume via \texttt{Modem.SetProperty("Powered", true)} ;
+\texttt{VoiceCallManager} apparait alors au tour suivant.
+
 \subsubsection{Polling des appels}
 
-Toutes les 2 secondes, \texttt{get\_calls()} envoie
+Toutes les secondes, \texttt{get\_calls()} envoie
 \texttt{VoiceCallManager.GetCalls()} et extrait pour chaque appel \texttt{State},
 \texttt{LineIdentification} et \texttt{Name}. Le thread met à jour
 \texttt{has\_incoming\_call} si un appel est en etat \texttt{"incoming"} ou
@@ -979,32 +1280,59 @@ Toutes les 2 secondes, \texttt{get\_calls()} envoie
 
 \subsubsection{Decrocher et raccrocher}
 
-\texttt{call\_voicecall\_method(call\_path, method)} envoie \texttt{Answer} ou
-\texttt{Hangup} à \texttt{org.ofono.VoiceCall} (timeout 5~s).
+Les boutons posent \texttt{CALL\_ANSWER} ou \texttt{CALL\_HANGUP} dans
+\texttt{g\_state.call\_cmd} (avec le chemin de l'appel) et masquent le panneau
+immediatement. Le thread appels execute ensuite \texttt{call\_voicecall\_method()},
+qui envoie \texttt{Answer} ou
+\texttt{Hangup} à \texttt{org.ofono.VoiceCall} (timeout 3~s).
 
 \subsection{Timer UI (100~ms)}
 
-\begin{lstlisting}[style=ccode,caption={main.c --- callback du timer LVGL}]
+\begin{lstlisting}[style=ccode,caption={main.c --- callback du timer LVGL (v4)}]
 static void ui_update_timer(lv_timer_t *timer) {
-    update_nav_display();
-    update_music_display();
-    update_call_display();
-    speedo_set_speed((int32_t)g_state.nav.speed);
+    /* Copie rapide sous verrou, puis travail LVGL sans verrou */
+    pthread_mutex_lock(&g_state.lock);
+    nav = g_state.nav;   music = g_state.music;   call = g_state.current_call;
+    cover_version = g_state.cover_version;  /* ... */
+    pthread_mutex_unlock(&g_state.lock);
+
+    update_nav_display(&nav, nav_connected);
+    update_music_display(&music, cover_version);
+    update_call_display(incoming, &call);
+    speedo_set_speed((int32_t)nav.speed);
+    bt_agent_get_status(status, sizeof(status));   /* texte sous Pair */
 }
 \end{lstlisting}
 
 \begin{description}
   \item[\texttt{update\_nav\_display()}]
-    Instruction, distance (m ou km), nom de rue ou \og Unknown Street \fg{}.
+    Instruction, distance (\og -{}- m\fg{} si inconnue, sinon m arrondis a 10~m au-dela de
+    100~m, ou km), puis nom de rue ou ETA sur la ligne du bas.
   \item[\texttt{update\_music\_display()}]
-    Titre, artiste, jaquette rechargee via \texttt{stat()} +
-    \texttt{lv\_image\_set\_src()}, label Play/Pause.
+    Titre, artiste, label Play/Pause. La jaquette n'est rechargee que si
+    \texttt{cover\_version} a change (en v3 : decodage JPEG toutes les 100~ms), apres
+    \texttt{lv\_image\_cache\_drop()} pour ne pas reafficher l'ancienne image en cache.
   \item[\texttt{update\_call\_display()}]
     Affiche/masque le panneau (\texttt{LV\_OBJ\_FLAG\_HIDDEN}), nom ou
-    \og Unknown \fg{} et numero de telephone.
+    \og Unknown\fg{} et numero de telephone.
   \item[\texttt{speedo\_set\_speed()}]
-    Compteur mis à jour avec \texttt{g\_state.nav.speed} en km/h entier.
+    Compteur mis à jour avec la vitesse en km/h entier.
 \end{description}
+
+Tous les textes passent par \texttt{label\_set\_if\_changed()}, qui n'appelle
+\texttt{lv\_label\_set\_text()} que si le texte a change (evite des redessins inutiles).
+
+\subsubsection{Accents et polices LVGL}
+
+Les polices Montserrat integrees a LVGL ne couvrent que l'ASCII : \og Tournez à droite\fg{}
+s'afficherait \og Tournez  droite\fg{}. \texttt{fold\_to\_ascii()} decode l'UTF-8 et remplace
+les caracteres accentues par leur equivalent sans accent (\og é\fg{} $\to$ \og e\fg{},
+\og ç\fg{} $\to$ \og c\fg{}, \og œ\fg{} $\to$ \og oe\fg{}), les espaces insecables par des
+espaces, \og ·\fg{} par \og -\fg{}, et ignore les emoji. Elle est appliquee aux textes de
+navigation et de musique via \texttt{label\_set\_text\_ascii()}.
+
+Pour afficher les vrais accents, il faudrait generer une police Montserrat incluant la
+plage Latin-1 avec le convertisseur de polices LVGL (\url{https://lvgl.io/tools/fontconverter}).
 
 \subsection{Layout LVGL}
 
@@ -1018,29 +1346,33 @@ Conteneur nav. & $500\times500$ & Centre, +100~px Y & \texttt{\#1a1a2e} \\
 Conteneur musique & $830\times220$ & Bas, $-150$~px Y & \texttt{\#0f0f1e} \\
 Jaquette album & $100\times100$ & Gauche musique & --- \\
 Panneau appel & $600\times250$ & Par-dessus musique & \texttt{\#393a4f} \\
-Pair Button & Petit & Sous musique & Bleu \\
+Pair Button & $60\times60$ & Bas, $-20$~px Y & Bleu \\
+Statut appairage & Texte & Bas, $-100$~px Y & --- \\
 \bottomrule
 \end{tabular}
 \end{center}
 
 Le panneau d'appel est cree avec \texttt{LV\_OBJ\_FLAG\_HIDDEN} et n'est rendu
-visible que lors d'un appel entrant. Le Pair Button appelle \texttt{bluetooth\_pair\_device\_start()}.
+visible que lors d'un appel entrant. Le Pair Button appelle
+\texttt{bt\_agent\_open\_pairing\_window()} ; le label de statut affiche le compte a
+rebours puis \og Paired: <nom>\fg{}.
 
 \subsection{Callbacks des boutons}
 
-Six boutons LVGL sont definis :
+Six boutons LVGL sont definis. Leurs callbacks sont non bloquants : ils posent une
+commande que le thread concerne execute.
 
 \begin{center}
 \begin{tabular}{lll}
 \toprule
-\textbf{Bouton} & \textbf{Fonction} & \textbf{Interface} \\
+\textbf{Bouton} & \textbf{Action (thread UI)} & \textbf{Execute par} \\
 \midrule
-Pair & \texttt{bluetooth\_pair\_device\_start()} & \texttt{bt\_make\_discoverable.sh} \\
-Precedent & \texttt{Previous} & \texttt{org.bluez.MediaPlayer1} \\
-Play/Pause & \texttt{Play} / \texttt{Pause} & \texttt{org.bluez.MediaPlayer1} \\
-Suivant & \texttt{Next} & \texttt{org.bluez.MediaPlayer1} \\
-Decrocher & \texttt{Answer} & \texttt{org.ofono.VoiceCall} \\
-Raccrocher & \texttt{Hangup} & \texttt{org.ofono.VoiceCall} \\
+Pair & \texttt{bt\_agent\_open\_pairing\_window()} & thread agent (\texttt{Adapter1}) \\
+Precedent & \texttt{MEDIA\_PREV} & thread musique (\texttt{MediaPlayer1.Previous}) \\
+Play/Pause & \texttt{MEDIA\_PLAY} / \texttt{MEDIA\_PAUSE} & thread musique \\
+Suivant & \texttt{MEDIA\_NEXT} & thread musique (\texttt{MediaPlayer1.Next}) \\
+Decrocher & \texttt{CALL\_ANSWER} & thread appels (\texttt{VoiceCall.Answer}) \\
+Raccrocher & \texttt{CALL\_HANGUP} & thread appels (\texttt{VoiceCall.Hangup}) \\
 \bottomrule
 \end{tabular}
 \end{center}
@@ -1125,6 +1457,18 @@ Dependances : \texttt{libcurl} et \texttt{json-c}. Retourne 1 en succes, 0 sinon
 Si le telechargement echoue (pas de reseau, artiste inconnu), la fonction retourne 0
 et l'ancienne jaquette reste affichee jusqu'au prochain changement de piste.
 
+\textbf{Modifications v4 :}
+\begin{itemize}
+  \item \texttt{curl\_global\_init()} est appele une seule fois dans \texttt{main()} (cette
+    fonction n'est pas thread-safe) et n'est plus appele a chaque telechargement.
+  \item \texttt{CURLOPT\_NOSIGNAL} (obligatoire en multi-thread), \texttt{CURLOPT\_CONNECTTIMEOUT}
+    de 5~s et \texttt{CURLOPT\_TIMEOUT} de 10~s (JSON) / 15~s (image) : sans reseau, le
+    thread jaquette ne reste plus bloque et n'empeche pas l'arret.
+  \item L'image est ecrite dans \texttt{cover.jpg.part} puis renommee (\texttt{rename()}) :
+    l'UI ne lit jamais une image a moitie telechargee.
+  \item La recherche utilise l'album s'il est connu, sinon le titre.
+\end{itemize}
+
 %% ===========================================================================
 \section{Ordre de demarrage complet}
 %% ===========================================================================
@@ -1133,11 +1477,14 @@ et l'ancienne jaquette reste affichee jusqu'au prochain changement de piste.
   \item \textbf{Demarrer le Raspberry Pi} : \texttt{bluetooth}, \texttt{ofono} et
     \texttt{nav-bind} demarrent automatiquement via systemd (apres SETUP.sh).
   \item \textbf{Sur le telephone} : activer le Bluetooth.
-  \item \textbf{Lancer le dashboard} : \texttt{./bin/main} depuis \texttt{lv\_port\_vscode/build}.
-  \item \textbf{Cliquer sur le bouton Pair} dans le dashboard.
-  \item \textbf{Appairer le telephone} via Parametres Bluetooth du Pi.
-  \item \textbf{Ouvrir NavRelay} et appuyer sur \textbf{Start}.
+  \item \textbf{Lancer le dashboard} : \texttt{./main} depuis \texttt{lv\_port\_pc\_vscode/bin}.
+  \item \textbf{Premiere fois seulement} : cliquer sur \textbf{Pair} puis appairer depuis
+    les Parametres Bluetooth \emph{du telephone} (aucune action sur le Pi).
+    Ensuite, le telephone se reconnecte automatiquement.
+  \item \textbf{Ouvrir NavRelay} et appuyer sur \textbf{Start} ; verifier l'ecran d'etat.
   \item \textbf{Lancer Google Maps} et une navigation.
+  \item L'ordre n'a plus d'importance : le lecteur musique, le modem d'appels et
+    \texttt{/dev/rfcomm1} sont redecouverts automatiquement.
 \end{enumerate}
 
 \begin{center}
@@ -1145,10 +1492,12 @@ et l'ancienne jaquette reste affichee jusqu'au prochain changement de piste.
 \toprule
 \textbf{Thread} & \textbf{Source de donnees} & \textbf{Intervalle} \\
 \midrule
-\texttt{nav\_thread\_fn} & \texttt{/dev/rfcomm1} (JSON) & Bloquant sur \texttt{fgets()} \\
-\texttt{music\_thread\_fn} & D-Bus \texttt{MediaPlayer1} & 2 secondes \\
-\texttt{calls\_thread\_fn} & D-Bus \texttt{VoiceCallManager} & 2 secondes \\
-Timer UI & \texttt{lv\_timer\_handler()} & 100 ms \\
+\texttt{nav\_thread\_fn} & \texttt{/dev/rfcomm1} (JSON) & \texttt{poll()} 500~ms \\
+\texttt{music\_thread\_fn} & D-Bus \texttt{MediaPlayer1} & 1~s (commandes : 200~ms) \\
+\texttt{cover\_thread\_fn} & API iTunes (libcurl) & a chaque changement de piste \\
+\texttt{calls\_thread\_fn} & D-Bus \texttt{VoiceCallManager} & 1~s (commandes : 200~ms) \\
+Thread agent (\texttt{bt\_agent.c}) & D-Bus \texttt{Agent1} / \texttt{Adapter1} & 200~ms \\
+Timer UI & \texttt{lv\_timer\_handler()} & 100~ms \\
 \bottomrule
 \end{tabular}
 \end{center}
@@ -1161,9 +1510,11 @@ Timer UI & \texttt{lv\_timer\_handler()} & 100 ms \\
 
 \begin{itemize}
   \item[\checkmark] Bluetooth demarre : \texttt{sudo systemctl status bluetooth}
-  \item[\checkmark] oFono demarre : \texttt{sudo systemctl status ofono}  
+  \item[\checkmark] oFono demarre : \texttt{sudo systemctl status ofono}
   \item[\checkmark] nav-bind service actif : \texttt{sudo systemctl status nav-bind.service}
   \item[\checkmark] Adaptateur visible : \texttt{hciconfig} (affiche \texttt{hci0})
+  \item[\checkmark] Widget Bluetooth retire de la barre des taches
+    (\texttt{bash disable\_panel\_bluetooth.sh})
 \end{itemize}
 
 \subsection{Checklist appairage}
@@ -1171,16 +1522,19 @@ Timer UI & \texttt{lv\_timer\_handler()} & 100 ms \\
 \begin{itemize}
   \item[\checkmark] Telephone detectable : \texttt{bluetoothctl scan on}
   \item[\checkmark] Telephone appaire : \texttt{bluetoothctl paired-devices}
-  \item[\checkmark] Telephone de confiance : \texttt{bluetoothctl trust <MAC>}
-  \item[\checkmark] Telephone connecte : \texttt{bluetoothctl info <MAC>} → \texttt{Connected: yes}
+  \item[\checkmark] Telephone de confiance : \texttt{bluetoothctl info <MAC>} $\to$ \texttt{Trusted: yes}
+    (fait automatiquement par l'agent)
+  \item[\checkmark] Telephone connecte : \texttt{bluetoothctl info <MAC>} $\to$ \texttt{Connected: yes}
 \end{itemize}
 
 \subsection{Checklist application}
 
 \begin{itemize}
   \item[\checkmark] Executable compile : \texttt{ls -la lv\_port\_vscode/bin/main}
-  \item[\checkmark] Affichage X11 disponible : \texttt{echo \$DISPLAY} → \texttt{:0}
-  \item[\checkmark] Permissions dialout : \texttt{groups pi5} → contient \texttt{dialout}
+  \item[\checkmark] Affichage disponible : \texttt{echo \$DISPLAY} $\to$ \texttt{:0}
+  \item[\checkmark] Groupes : \texttt{groups pi5} $\to$ contient \texttt{dialout} et \texttt{bluetooth}
+  \item[\checkmark] NavRelay : les 4 lignes d'etat indiquent \texttt{OK}, \texttt{bound},
+    \texttt{Connected to ...} et un compteur qui augmente
 \end{itemize}
 
 %% ===========================================================================
@@ -1193,7 +1547,27 @@ Timer UI & \texttt{lv\_timer\_handler()} & 100 ms \\
   \item Verifier que \texttt{/dev/rfcomm1} existe : \texttt{ls /dev/rfcomm*}
   \item Tester la reception : \texttt{cat /dev/rfcomm1} (doit afficher des lignes JSON).
   \item Verifier les permissions : \texttt{sudo usermod -aG dialout pi5}.
-  \item Dans NavRelay : cliquer sur \textbf{Start}, verifier que l'etat passe à \texttt{"NavServer running"}.
+  \item Dans NavRelay : cliquer sur \textbf{Start}, puis lire l'ecran d'etat :
+  \begin{itemize}
+    \item ligne 2 \og NOT bound\fg{} : desactiver puis reactiver NavRelay dans
+      \emph{Acces aux notifications} (frequent apres une reinstallation) ;
+    \item ligne 3 bloquee sur \og Waiting for the Pi...\fg{} : verifier
+      \texttt{journalctl -fu nav-bind} (doit afficher \texttt{bound /dev/rfcomm1 ...}) ;
+    \item ligne 4 qui augmente mais rien sur le dashboard : tester \texttt{cat /dev/rfcomm1}
+      dashboard ferme.
+  \end{itemize}
+  \item Le terminal du dashboard doit afficher \texttt{Connected to /dev/rfcomm1} puis des
+    lignes \texttt{Nav updated: ...}.
+\end{itemize}
+
+\subsection{Distance \og -{}- m\fg{} ou action incorrecte}
+
+\begin{itemize}
+  \item Afficher ce que Maps envoie : \texttt{adb logcat -s NavRelay} pendant une navigation.
+  \item Les lignes \texttt{title=... text=... sub=...} montrent la disposition de la
+    notification ; la ligne \texttt{-> next=... dist=... eta=...} montre le classement.
+  \item Si la disposition de Maps a change, adapter \texttt{DIST\_RE} / \texttt{ETA\_RE}
+    dans \texttt{MapsNotificationListener.kt}.
 \end{itemize}
 
 \subsection{\og No MediaPlayer\fg{}}
@@ -1201,14 +1575,16 @@ Timer UI & \texttt{lv\_timer\_handler()} & 100 ms \\
 \begin{itemize}
   \item Verifier A2DP avec \texttt{busctl tree org.bluez} (chercher \texttt{/player0}).
   \item Jouer un morceau sur le telephone pour que BlueZ cree \texttt{MediaPlayer1}.
-  \item Redemarrer le dashboard si le player est apparu apres son demarrage.
+  \item Le dashboard le detecte seul en moins de 3~s (message \texttt{[Music] MediaPlayer found}) ;
+    il n'est plus necessaire de le redemarrer.
 \end{itemize}
 
 \subsection{Aucun appel detecte}
 
 \begin{itemize}
   \item Verifier oFono : \texttt{systemctl status ofono}.
-  \item Verifier \texttt{Disable=Headset} dans \texttt{/etc/bluetooth/main.conf}.
+  \item Verifier les messages \texttt{[Calls]} dans le terminal du dashboard
+    (\texttt{HFP modem found}, \texttt{Powered on modem}).
   \item Verifier l'existence de \texttt{/etc/pipewire/pipewire-pulse.conf.d/10-ofono.conf}.
   \item Tester : \texttt{busctl call org.ofono / org.ofono.Manager GetModems}.
 \end{itemize}
@@ -1225,10 +1601,31 @@ Timer UI & \texttt{lv\_timer\_handler()} & 100 ms \\
 \subsection{Pair Button ne fonctionne pas}
 
 \begin{itemize}
-  \item Verifier que \texttt{bt\_make\_discoverable.sh} existe et est executable :
-    \texttt{ls -la /home/pi5/dashboard/bt\_make\_discoverable.sh}
-  \item Tester manuellement : \texttt{bash /home/pi5/dashboard/bt\_make\_discoverable.sh}
-  \item Verifier les logs dashboard : \texttt{journalctl -fu dashboard.service}
+  \item Lire les messages \texttt{[BT agent]} du dashboard : \texttt{Registered (NoInputNoOutput)}
+    doit apparaitre au demarrage.
+  \item \texttt{RegisterAgent failed} ou \texttt{Set ... failed} : verifier que \texttt{pi5}
+    est dans le groupe \texttt{bluetooth} (\texttt{groups pi5}), puis se reconnecter.
+  \item \texttt{... -> rejected (press Pair first)} : la demande est arrivee hors de la
+    fenetre de 3~minutes ; rappuyer sur Pair.
+  \item \og Bluetooth error\fg{} sous le bouton : l'adaptateur n'a pas pu etre rendu visible
+    (\texttt{rfkill list}, \texttt{bluetoothctl show}).
+\end{itemize}
+
+\subsection{Une fenetre Bluetooth du bureau apparait encore}
+
+\begin{itemize}
+  \item Fenetre \og Pairing successful / Connection successful\fg{} : c'est le widget de la
+    barre des taches ; lancer \texttt{bash disable\_panel\_bluetooth.sh} (sans sudo).
+  \item Fenetre de confirmation de code : un autre agent a repris la place d'agent par defaut
+    (par exemple \texttt{bluetoothctl default-agent}) ; le dashboard la reprend en 15~s maximum.
+\end{itemize}
+
+\subsection{Le dashboard ne se ferme pas}
+
+\begin{itemize}
+  \item Utiliser Échap, Ctrl+Q, Ctrl+C ou \texttt{systemctl -{}-user stop dashboard}.
+  \item Un message \texttt{Thread ... did not stop in time} indique un thread bloque ;
+    le processus est de toute facon termine apres 6~s (\texttt{alarm}).
 \end{itemize}
 
 \subsection{Commandes de logs utiles}
@@ -1257,17 +1654,22 @@ dbus-monitor --system \
     BlueZ ne supporte pas AVRCP~1.6 de maniere stable. La jaquette est recuperee via
     l'API iTunes Search, ce qui necessite une connexion Internet et introduit un
     delai au changement de piste.
-  \item[Redecouverte du player BlueZ]
-    \texttt{find\_player\_path()} est appelee une seule fois au demarrage du thread
-    musique. En cas de deconnexion Bluetooth pendant l'execution, il faut redemarrer
-    le dashboard pour redecouvrir le player.
+  \item[Format des notifications Google Maps]
+    NavRelay depend de la disposition des notifications de Maps, qui n'est pas documentee
+    et peut changer. Le classement par contenu (ETA / distance / action) et le filet de
+    securite limitent l'impact ; \texttt{adb logcat -s NavRelay} permet de diagnostiquer.
+  \item[Accents]
+    Les polices LVGL integrees etant ASCII, les accents sont remplaces par la lettre simple.
   \item[Canal RFCOMM variable]
     Le canal assigne à \texttt{NavJsonService} par Android peut changer à chaque
     redemarrage. Ce cas est gere automatiquement par \texttt{nav-bind-daemon.sh}
     via le registre SDP.
-  \item[Approach systeme vs. script]
-    La nouvelle approche du Pair Button utilise l'interface Bluetooth native du Pi OS
-    plutôt quune tentative automatisee, ce qui elimine les conflits logiciels.
+  \item[Widget Bluetooth du bureau]
+    Il est retire de la barre des taches pour eviter ses fenetres ; l'appairage se fait
+    uniquement par le bouton Pair (ou \texttt{bluetoothctl}).
+  \item[\texttt{sdptool}]
+    \texttt{nav-bind-daemon.sh} utilise \texttt{sdptool}, deprecie dans BlueZ~5 ; il necessite
+    que \texttt{bluetoothd} tourne en mode compatibilite sur certaines installations.
 \end{description}
 
 %% ===========================================================================
@@ -1286,8 +1688,14 @@ dbus-monitor --system \
   \item[\texttt{nav-bind-daemon.sh}]
     Daemon de liaison RFCOMM. Maintient le binding entre \texttt{/dev/rfcomm1} et
     le service NavRelay du telephone. À adapter pour un autre MAC.
+  \item[\texttt{lv\_port\_pc\_vscode/src/bt\_agent.c} / \texttt{bt\_agent.h}]
+    Agent d'appairage BlueZ integre au dashboard (bouton Pair). Remplace \texttt{bt\_pairing.h}.
+  \item[\texttt{disable\_panel\_bluetooth.sh}]
+    Retire (ou restaure avec \texttt{-{}-restore}) le widget Bluetooth de la barre des taches
+    Pi OS. Appele par \texttt{SETUP.sh}.
   \item[\texttt{bt\_make\_discoverable.sh}]
-    Rend le Pi decouvrable pendant 3 minutes. Appele par le Pair Button.
+    \emph{Plus utilise par le dashboard depuis la v4} (remplace par \texttt{bt\_agent.c}).
+    Conserve pour un usage manuel.
   \item[\texttt{bt\_setup\_audio.sh}]
     Configuration optionnelle de PulseAudio pour Bluetooth. Generalement non necessaire
     apres SETUP.sh.
