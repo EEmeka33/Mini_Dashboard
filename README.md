@@ -54,7 +54,7 @@ flowchart LR
 ### 1. Raspberry Pi
 
 ```bash
-git clone --recursive --branch master https://github.com/EEmeka33/Mini_Dashboard.git
+git clone --recursive https://github.com/EEmeka33/Mini_Dashboard.git
 cd Mini_Dashboard
 bash SETUP.sh          # 5 à 10 minutes
 ```
